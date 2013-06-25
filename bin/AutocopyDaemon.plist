@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>AutocopyDaemon</string>
+	<key>UserName</key>
+	<string>nhammond</string>
+	<key>Program</key>
+	<string>/usr/local/bin/autocopy_rundir.py</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/autocopy_rundir.py</string>
+		<string>/Volumes/IlluminaRuns*/Runs</string>
+	</array>
+	<key>EnableGlobbing</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>Debug</key>
+	<true/>
+	<key>RootDirectory</key>
+	<string>/</string>
+	<key>WorkingDirectory</key>
+	<string>/tmp</string>
+	<key>Umask</key>
+	<integer>79</integer>
+	<key>StandardInPath</key>
+	<string>/dev/null</string>
+	<key>StandardOutPath</key>
+	<string>/usr/local/log/autocopy.log</string>
+	<key>StandardErrorPath</key>
+	<string>/usr/local/log/autocopy.err</string>
+</dict>
+</plist>
