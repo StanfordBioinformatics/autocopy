@@ -44,7 +44,7 @@ import sys
 #
 #####
 
-DEST_HOST  = "snively.stanford.edu"
+DEST_HOST  = "crick.stanford.edu"
 DEST_USER  = pwd.getpwuid(os.getuid()).pw_name
 DEST_GROUP = "scg-admin"
 

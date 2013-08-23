@@ -70,7 +70,7 @@ TIME_LIMS_DELAY = 5 #seconds
 MAX_COPY_PROCESSES = 2
 
 # Where to copy the run directories to.
-COPY_DEST_HOST  = "snively.stanford.edu"
+COPY_DEST_HOST  = "crick.stanford.edu"
 COPY_DEST_USER  = pwd.getpwuid(os.getuid()).pw_name
 COPY_DEST_GROUP = "scg-admin"
 COPY_DEST_RUN_ROOT = "/srv/gs1/projects/scg/Runs"
