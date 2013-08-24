@@ -92,7 +92,7 @@ ARCH_PROCESS_EXEC = "make_archive_tar.py"
 ARCH_PROCESS_EXEC = os.path.join(os.path.dirname(__file__), ARCH_PROCESS_EXEC)
 
 # Whom to email to as directories are processed.
-EMAIL_TO          = 'scg-informatics-seq@lists.stanford.edu'
+EMAIL_TO          = 'scg-auto-notify@lists.stanford.edu'
 EMAIL_SUBJ_PREFIX = 'AUTOCOPY (%m): '
 EMAIL_SMTP_SERVER = 'smtp.stanford.edu'
 
