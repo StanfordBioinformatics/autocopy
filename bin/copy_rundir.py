@@ -48,8 +48,7 @@ DEST_HOST  = "crick.stanford.edu"
 DEST_USER  = pwd.getpwuid(os.getuid()).pw_name
 DEST_GROUP = "scg-admin"
 
-DEST_RUN_ROOT = "/srv/gs1/projects/scg/Runs"
-
+DEST_RUN_ROOT = "/srv/gsfs0/projects/gbsc/SeqCenter/Illumina/RunsInProgress"
 COPY_COMPLETED_FILE = "Autocopy_complete.txt"
 
 # Error/exit codes for various problems.
