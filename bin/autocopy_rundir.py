@@ -83,7 +83,7 @@ COPY_PROCESS_EXEC = "copy_rundir.py"
 COPY_PROCESS_EXEC = os.path.join(os.path.dirname(__file__), COPY_PROCESS_EXEC)
 
 # Where to archive the run directories to.
-ARCH_DEST_RUN_ROOT = "/srv/gsfs0/projects/gbsc/SeqCenter/Illumina/RawDataArchive/Illumina"
+ARCH_DEST_RUN_ROOT = "/srv/gsfs0/projects/gbsc/SeqCenter/Illumina/RawDataArchive"
 # The name of the executable which archives the run directories.
 ARCH_PROCESS_EXEC = "make_archive_tar.py"
 # Add the directory of this script to the path to the executable.
