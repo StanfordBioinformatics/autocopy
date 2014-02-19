@@ -713,7 +713,7 @@ def make_archive_tar(rundir, **opts):
         #
         # Compress and tar the directory into a temporary file.
         #
-        tar_cmd_list = ["tar", "-C", rundir.get_root()]
+        tar_cmd_list = ["gnutar", "-C", rundir.get_root()]
 
         # Control which files get into the tar.
         tar_cmd_list.extend(["--exclude", "Images", "--exclude", "Thumbnail_Images"])
@@ -735,7 +735,7 @@ def make_archive_tar(rundir, **opts):
             if debug: print >> sys.stderr, "DEBUG: %s" % " ".join(tar_cmd_list)
             retcode = subprocess.call(tar_cmd_list)
         else:
-            ssh_cmd_list = ["ssh", "-S", ssh_socket, "", "dd bs=1M >! %s" % (compressed_tar_path_tmp)]
+            ssh_cmd_list = ["ssh", "-S", ssh_socket, "", "dd bs=1M of=%s" % (compressed_tar_path_tmp)]
 
             if debug: print >> sys.stderr, "DEBUG: %s | %s" % (" ".join(tar_cmd_list), " ".join(ssh_cmd_list))
             tar_pipe_out = subprocess.Popen(tar_cmd_list, stdout=subprocess.PIPE)
@@ -783,7 +783,7 @@ def make_archive_tar(rundir, **opts):
         list_tar_file_out.close()
     else:
         list_tar_cmd_list = ["ssh", "-S", ssh_socket, "",
-                             "tar -tvz -f %s >! %s" % (compressed_tar_path, list_tar_path_tmp)]
+                             "tar -tvz -f %s --index-file=%s" % (compressed_tar_path, list_tar_path_tmp)]
         if debug: print >> sys.stderr, "DEBUG: %s" % " ".join(list_tar_cmd_list)
         retcode = subprocess.call(list_tar_cmd_list)
 
@@ -845,7 +845,7 @@ def make_archive_tar(rundir, **opts):
         compressed_list_tar_file.close()
     else:
         compress_list_cmd_list = ["ssh", "-S", ssh_socket, "",
-                                  "gzip -c %s >! %s" % (list_tar_path_tmp, compressed_list_tar_path_tmp) ]
+                                  "unset noclobber ; gzip -c %s > %s" % (list_tar_path_tmp, compressed_list_tar_path_tmp) ]
         if debug: print >> sys.stderr, "DEBUG: %s" % " ".join(compress_list_cmd_list)
         retcode = subprocess.call(compress_list_cmd_list)
 
@@ -906,7 +906,7 @@ def make_archive_tar(rundir, **opts):
         # ASSUMPTION: an ssh socket will be into a Linux machine.
         #
         md5_cmd_list = ["ssh", "-S", ssh_socket, ""]
-        md5_cmd_list.append("md5sum %s >! %s" % (compressed_tar_path,md5_path_tmp))
+        md5_cmd_list.append("unset noclobber ; md5sum %s > %s" % (compressed_tar_path,md5_path_tmp))
 
         if debug: print >> sys.stderr, "DEBUG: %s" % " ".join(md5_cmd_list)
         retcode = subprocess.call(md5_cmd_list)

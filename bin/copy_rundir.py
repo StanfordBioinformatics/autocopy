@@ -218,7 +218,7 @@ if not opts.rsync:
     # "tar -C run_path --exclude Images --exclude Thumbnail_Images -c run_path_base |
     #   ssh scg1 sg DEST_GROUP tar -C dest -x"
     #
-    tar_cmd_list = ["tar", # "-C", run_path_root,
+    tar_cmd_list = ["gnutar", # "-C", run_path_root,
                     "--exclude", "Images", "--exclude", "Thumbnail_Images"]
 
     if opts.no_cif:
