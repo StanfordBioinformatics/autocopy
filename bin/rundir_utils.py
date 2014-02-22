@@ -958,7 +958,7 @@ def make_archive_tar(rundir, **opts):
             if debug: print >> sys.stderr, "DEBUG: %s" % " ".join(interop_tar_cmd_list)
             retcode = subprocess.call(interop_tar_cmd_list)
         else:
-            interop_ssh_cmd_list = ["ssh", "-S", ssh_socket, "", "cat - > %s" % (interop_tar_path_tmp)]
+            interop_ssh_cmd_list = ["ssh", "-S", ssh_socket, "", "dd bs=1M of=%s" % (interop_tar_path_tmp)]
 
             if debug: print >> sys.stderr, "DEBUG: %s | %s" % (" ".join(interop_tar_cmd_list), " ".join(interop_ssh_cmd_list))
             tar_pipe_out = subprocess.Popen(interop_tar_cmd_list, stdout=subprocess.PIPE)
