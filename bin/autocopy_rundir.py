@@ -320,7 +320,7 @@ def get_archiving_rundirs(run_root=None):
         return filter(lambda rundir: rundir.get_root() == run_root, rundirs)
 
 
-def start_copy(rundir, rsync=False):
+def start_copy(rundir, rsync=True):
 
     # Construct copy command.
     copy_cmd_list = [COPY_PROCESS_EXEC,
