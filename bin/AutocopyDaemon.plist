@@ -5,7 +5,7 @@
 	<key>Label</key>
 	<string>AutocopyDaemon</string>
 	<key>UserName</key>
-	<string>nhammond</string>
+	<string>nwatson</string>
 	<key>Program</key>
 	<string>/usr/local/bin/autocopy_rundir.py</string>
 	<key>ProgramArguments</key>
