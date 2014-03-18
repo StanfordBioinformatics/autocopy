@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 for dir in /Volumes/IlluminaRuns?
 do 
 chmod 770 $dir;
