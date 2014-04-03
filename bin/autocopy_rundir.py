@@ -107,7 +107,6 @@ STATUS_LIMS_MISMATCH = 2
 LOG_DIR_DEFAULT = "/usr/local/log"
 tday = datetime.datetime.now()
 TODAY = str(tday.year) + str(tday.month) + str(tday.day)
-ARCHIVE_ERROR_LOG = open(os.path.join(LOG_DIR_DEFAULT,"archiveErrorLog_" + TODAY + ".txt"),'w')
 
 # Subdirectories to be created/used within each run root.
 # Archiving subdirectory, where run dirs are moved after they are reported as Archived in LIMS.
@@ -808,7 +807,7 @@ def phase2_5_examine_archiving_dirs():
         # If we have a archive process running (and we should: each RunDir here should have one),
         #  check to see if it ended happily, and change status to ARCHIVE_COMPLETE if it did.
         if rundir.archive_proc:
-
+             LOG_FILE.flush()
             retcode = rundir.archive_proc.poll()
             if retcode == 0:
                 # Archive succeeded: advance to Archive Complete.
@@ -851,9 +850,6 @@ def phase2_5_examine_archiving_dirs():
                 rundir.status = RunDir.STATUS_ARCHIVE_FAILED
                 rundir.drop_status_file()
 
-                errmsg = "Archive of " + rundir.get_dir() +  " failed with retcode " + str(retcode) +  ", emailing..."
-		ARCHIVE_ERROR_LOG.write(errmsg + "\n")
-		
                 log("Archive of", rundir.get_dir(), "failed with retcode", str(retcode), ", emailing...")
 
                 # Send an email announcing the failed run directory archive.
