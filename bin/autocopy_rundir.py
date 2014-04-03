@@ -807,7 +807,7 @@ def phase2_5_examine_archiving_dirs():
         # If we have a archive process running (and we should: each RunDir here should have one),
         #  check to see if it ended happily, and change status to ARCHIVE_COMPLETE if it did.
         if rundir.archive_proc:
-             LOG_FILE.flush()
+            LOG_FILE.flush()
             retcode = rundir.archive_proc.poll()
             if retcode == 0:
                 # Archive succeeded: advance to Archive Complete.
