@@ -1,5 +1,4 @@
 #!/bin/bash
 
 
-launchctl stop AutocopyDaemon
-launchctl unload AutocopyDaemon.plist
+sudo launchctl unload AutocopyDaemon.plist
