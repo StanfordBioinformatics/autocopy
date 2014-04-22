@@ -15,7 +15,7 @@
 #   --status_file: File to add to destination run directory to mark completion.
 #   --dry_run:     Stop at the copy step.
 #   --rsync:       Use rsync instead of tar over ssh.
-#   --no_cif:      Don't copy intensity files.
+#   --cif:         copy intensity files.
 #   --verbose:     Increase running status chatter.
 #
 # OUTPUT:
@@ -119,9 +119,9 @@ parser.add_option("-n", "--dry_run", dest="dry_run", action="store_true",
 parser.add_option("-r", "--rsync", dest="rsync", action="store_true",
                   default=False,
                   help='Use rsync instead of tar over ssh [default = false]')
-parser.add_option("-c", "--no_cif", dest="no_cif", action="store_true",
+parser.add_option("-c", "--cif", dest="cif", action="store_true",
                   default=False,
-                  help='Skip copying the intensity files (.cif) [default = false]')
+                  help='Copythe intensity files (.cif) [default = false]')
 parser.add_option("-v", "--verbose", dest="verbose", action="store_true",
                   default=False,
                   help='Get real chatty [default = false]')
@@ -221,7 +221,7 @@ if not opts.rsync:
     tar_cmd_list = ["gnutar", # "-C", run_path_root,
                     "--exclude", "Images", "--exclude", "Thumbnail_Images"]
 
-    if opts.no_cif:
+    if ! opts.cif:
         tar_cmd_list.extend(["--exclude", "Data/Intensities/L00*/C*"])
 
     if opts.verbose:
@@ -252,7 +252,7 @@ else:
     rsync_cmd_list = ["rsync", "-rlptRc", "-e", "ssh -S %s -l %s" % (SSH_CM_SOCKET, opts.user),
                       "--exclude=Thumbnail_Images/", "--chmod=Dug=rwX,Do=rX,Fug=rw,Fo=r"]
 
-    if opts.no_cif:
+    if ! opts.cif:
         rsync_cmd_list.append("--exclude=Data/Intensities/L00*/C*/")
 
     if opts.verbose:
