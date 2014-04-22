@@ -332,7 +332,7 @@ def start_copy(rundir, rsync=True):
                      "--dest_root", COPY_DEST_RUN_ROOT,
                      "--status_file", RunDir.STATUS_FILES[RunDir.STATUS_COPY_COMPLETE],
                      "--ssh_socket", SSH_SOCKET_CLUSTER,
-                     "--no_cif" ]
+										 ]
 
     if rsync:
         copy_cmd_list.append("--rsync")
@@ -360,7 +360,7 @@ def start_archive(rundir):
     arch_cmd_list = [ARCH_PROCESS_EXEC,
                      "--ssh_socket", SSH_SOCKET_CLUSTER,
                      "--destDir", os.path.join(ARCH_DEST_RUN_ROOT, year),
-                     "--no_cif" ]
+                     ]
     
     # End command with run directory to archive.
     arch_cmd_list.append(rundir.get_path())
@@ -682,7 +682,7 @@ def phase2_examine_copying_dirs():
 
                 # Validate that the run directory has all the right files.
                 log(rundir.get_dir(), ": Validating")
-                valid_rundir = rundir_utils.validate(rundir, no_cif=True)
+                valid_rundir = rundir_utils.validate(rundir)
 
                 if valid_rundir:
                     log(rundir.get_dir(), "is a valid run directory.")
