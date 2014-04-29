@@ -18,7 +18,7 @@ import tarfile
 # validate() confirms that a set of files necessary to analyze
 #  an Illumina run directory exist and have non-zero size.
 #
-def validate(rundir, no_cif=False, verbose=False):
+def validate(rundir, cif=False, verbose=False):
 
     # Confirms non-zero-size existence of:
     #  Data/
@@ -105,7 +105,7 @@ def validate(rundir, no_cif=False, verbose=False):
                 if pos_file not in intensities_lane_files:
                     missing_position_files.append(pos_file)
 
-        if not no_cif:
+        if cif:
             missing_cycle_dirs = []
             found_one_cif_file = False
             for cyc in range(1, total_cycles+1):
@@ -586,7 +586,7 @@ def make_thumbnail_subset_tar(rundir, overwrite=False, verbose=False):
 #                 Note: if sshSocket is given, destDir is relative to host the socket connects to.
 #   fileCheck :   Should we run the spot check for files? (default = True)
 #   deleteAfter : Should we delete the run directory after archiving? (default = False)
-#   noCif :       Should we also tar the Intensity files? (default = False: "go ahead and tar .cifs")
+#   cif :       Should we also tar the Intensity files? (default = False: "go ahead and tar .cifs")
 #   sshSocket :   Which ssh socket file to use to stream the tar files? (default = None)
 #   verbose :     Should we get chatty? (default = False)
 #   debug :       Should we talk about everything? (default = False)
@@ -609,7 +609,7 @@ def make_archive_tar(rundir, **opts):
     defaults = dict(destDir=rundir.get_root(),
                     fileCheck=True,
                     deleteAfter=False,
-                    noCif=False,
+                    cif=False,
                     sshSocket=None,
                     verbose=False,
                     debug=False)
@@ -717,7 +717,7 @@ def make_archive_tar(rundir, **opts):
 
         # Control which files get into the tar.
         tar_cmd_list.extend(["--exclude", "Images", "--exclude", "Thumbnail_Images"])
-        if opts['noCif']:
+        if ! opts['cif']:
             tar_cmd_list.extend(["--exclude", "Data/Intensities/L00*/C*"])
 
         tar_cmd_list.extend(["-c", "-z"])

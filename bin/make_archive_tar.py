@@ -68,9 +68,9 @@ parser.add_option("-f", "--skipFileCheck", dest="skipFileCheck", action="store_t
 parser.add_option("-d", "--destDir", dest="destDir", type="string",
                   default=None,
                   help='Where should the resulting tar file go? [default = root dirs of run directories]')
-parser.add_option("-c", "--no_cif", dest="noCif", action="store_true",
+parser.add_option("-c", "cif", dest="cif", action="store_true",
                   default=False,
-                  help='Skip tarring the intensity files (.cif) [default = false]')
+                  help='Tar the intensity files (.cif) [default = false]')
 parser.add_option("-s", "--ssh_socket", dest="ssh_socket", type="string",
                   default=None,
                   help="SSH Control Master socket to run all ssh commands through")
@@ -90,7 +90,7 @@ for arg in args:
 
     if rundir_utils.make_archive_tar(rundir, destDir=opts.destDir, verbose=opts.verbose, debug=opts.debug,
                                      fileCheck=not opts.skipFileCheck, deleteAfter=opts.deleteAfter,
-                                     noCif=opts.noCif, sshSocket=opts.ssh_socket):
+                                     cif=opts.cif, sshSocket=opts.ssh_socket):
         print >> sys.stderr, "make_archive_tar.py: %s failed" % rundir.get_dir()
         error_rundirs += 1
 

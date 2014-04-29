@@ -74,7 +74,7 @@ class RunDir:
      STATUS_ARCHIVE_FAILED,
      STATUS_RUN_ABORTED) = range(STATUS_MAX_INDEX)
 
-    # Status files 
+    # Status files
     STATUS_FILES= [
         None,
         "First_Base_Report.txt",
@@ -95,8 +95,75 @@ class RunDir:
         "Archive_complete.txt",
         "Archive_failed.txt",
         "Run_aborted.txt"
-        ]
+    ]
+
+    #
+    # Analysis Statuses
+    #
     
+    # NOTE:
+
+    # Elements of each list = [ HUMAN READABLE STRING, COMPUTER READABLE STRING, FILENAME ]
+    ANALYSIS_STATUS_ARRAY = [
+        [ "None", "None", None ],
+        [ "Analysis Started", "STARTED", "Analysis_started.txt" ],
+        [ "Pre-run Started", "PRERUN_STARTED", "Pre-run_started.txt"],
+        [ "Pre-run Complete", "PRERUN_COMPLETE", "Pre-run_complete.txt"],
+        [ "Bcl LANE Started", "BCL_STARTED", "Bcl_LANE_started.txt"],
+        [ "Bcl LANE Complete", "BCL_COMPLETE", "Bcl_LANE_complete.txt"],
+        [ "Mapping LANE Started", "MAPPING_STARTED", "Mapping_LANE_started.txt"],
+        [ "Mapping LANE Complete", "MAPPING_COMPLETE", "Mapping_LANE_complete.txt"],
+        [ "Publish LANE Started", "PUBLISH_STARTED", "Publish_LANE_started.txt"],
+        [ "Publish LANE Complete", "PUBLISH_COMPLETE", "Publish_LANE_complete.txt"],
+        [ "Post-run Started", "POSTRUN_STARTED", "Post-run_started.txt"],
+        [ "Post-run Complete", "POSTRUN_COMPLETE", "Post-run_complete.txt"],
+        [ "Analysis Complete", "COMPLETE", "Analysis_complete.txt"]
+    ]
+    # Indices for the sublists above.
+    (ANALYSIS_STATUS_IDX_HUMAN_STRING,
+     ANALYSIS_STATUS_IDX_COMP_STRING,
+     ANALYSIS_STATUS_IDX_FILENAME) = range(3)
+    
+#    # Analysis Status strings
+#    ANALYSIS_STATUS_STRS= [
+#        None,
+#        "Analysis Started",
+#
+#        "Pre-run Started",
+#        "Pre-run Complete"
+#
+#        "Bcl LANE Started",
+#        "Bcl LANE Complete",
+#        "Mapping LANE Started",
+#        "Mapping LANE Complete",
+#        "Publish LANE Started",
+#        "Publish LANE Complete",
+#
+#        "Post-run Started",
+#        "Post-run Complete",
+#
+#        "Analysis Complete"
+#    ]
+
+    # Analysis Status constants
+    ANALYSIS_STATUS_MAX_INDEX = len(ANALYSIS_STATUS_ARRAY)
+    (ANALYSIS_STATUS_NONE,
+     ANALYSIS_STATUS_STARTED,
+     ANALYSIS_STATUS_PRERUN_STARTED,
+     ANALYSIS_STATUS_PRERUN_COMPLETE,
+     ANALYSIS_STATUS_BCL_STARTED,
+     ANALYSIS_STATUS_BCL_FINISHED,
+     ANALYSIS_STATUS_MAPPING_STARTED,
+     ANALYSIS_STATUS_MAPPING_COMPLETE,
+     ANALYSIS_STATUS_PUBLISH_STARTED,
+     ANALYSIS_STATUS_PUBLISH_FINISHED,
+     ANALYSIS_STATUS_POSTRUN_STARTED,
+     ANALYSIS_STATUS_POSTRUN_COMPLETE,
+     ANALYSIS_STATUS_COMPLETE
+    ) = range(ANALYSIS_STATUS_MAX_INDEX)
+
+    ANALYSIS_STATUS_PATH = os.path.join("Analysis","Status")
+
     # Path relative to run directory to Status.xml file,
     #  which contains reads and cycles.
     DATA_STATUS_PATH = os.path.join("Data","reports","Status.xml")
@@ -129,6 +196,8 @@ class RunDir:
         self.cycle_list = None
         self.paired_end = None
         self.index_read = None
+
+        self.lanes = None
 
         self.platform = None
         self.control_software_version = None
@@ -170,6 +239,7 @@ class RunDir:
         s += "\n"
         s += "  Platform:\t%s\n" % RunDir.PLATFORM_NAMES[self.get_platform()]
         s += "  SW Version:\t%s\n" % self.get_control_software_version()
+        s += "  Lanes:\t%s\n" % self.get_lanes()
         return s
 
     ###
@@ -266,7 +336,7 @@ class RunDir:
 
     def get_number(self):
 
-        # Determine the number from the run dir, if it hasn't been done yet.
+        # Determine the run number from the run dir, if it hasn't been done yet.
         if self.number is None:
 
             # Get run number from RunInfo.xml.
@@ -389,10 +459,32 @@ class RunDir:
     def get_scored_cycle(self):
         return RunDir.get_cycle_tag_from_statusupdate(self.get_path(),"ScoreCycle")
 
+    def get_lanes(self):
+        if self.lanes is None:
+            platform = self.get_platform()
+            if platform == RunDir.PLATFORM_ILLUMINA_GA:
+                self.lanes = 8
+            elif platform == RunDir.PLATFORM_ILLUMINA_HISEQ:
+                # Advent of HiSeq 2500: put check for run mode here.
+                self.lanes = 8
+            elif platform == RunDir.PLATFORM_ILLUMINA_MISEQ:
+                self.lanes = 1
+            else:
+                print >> sys.stderr, "RunDir.get_lanes(): unknown platform"
+
+        return self.lanes
+
+    #
+    # SEQUENCING STATUS METHODS
+    #
     def get_status(self):
         return self.status
+    def get_seq_status(self):
+        return self.get_status()
     def get_status_string(self):
         return RunDir.STATUS_STRS[self.status]
+    def get_seq_status_string(self):
+        return self.get_status_string()
     
     def update_status(self):
         # Find the highest numbered status (latest in workflow) that
@@ -405,16 +497,23 @@ class RunDir:
             self.status = RunDir.STATUS_INITIALIZED
 
         return self.status
+    def update_seq_status(self):
+        return self.update_status()
 
     def drop_status_file(self):
         if RunDir.STATUS_FILES[self.status] is not None:
             fp = open(os.path.join(self.get_path(), RunDir.STATUS_FILES[self.status]),"w")
             fp.close()
+    def drop_seq_status_file(self):
+        self.drop_status_file()
 
     def undrop_status_file(self):
         if (RunDir.STATUS_FILES[self.status] is not None and
             self.status > RunDir.STATUS_BASECALLING_COMPLETE_READ4):
-            os.remove(os.path.join(self.get_path(), RunDir.STATUS_FILES[self.status]))
+            status_path = os.path.join(self.get_path(), RunDir.STATUS_FILES[self.status])
+            os.remove(status_path)
+    def undrop_seg_status_file(self):
+        self.undrop_status_file()
 
     def is_finished(self):
 
@@ -463,12 +562,99 @@ class RunDir:
         else:
             print >> sys.stderr, "RunDir.is_finished(): %s: Platform unknown" % (self.get_dir())
             return False
+    def is_seq_finished(self):
+        return self.is_finished()
 
     def is_copied(self):
         return (self.status == RunDir.STATUS_COPY_COMPLETE or
                 self.status == RunDir.STATUS_ARCHIVE_STARTED or
                 self.status == RunDir.STATUS_ARCHIVE_COMPLETE or
                 self.status == RunDir.STATUS_ARCHIVE_FAILED)
+
+    #
+    # ANALYSIS STATUS METHODS
+    #
+    def get_analysis_status(self, lane=None):
+
+        # If no analysis status directory, status is NONE.
+        analysis_status_path = os.path.join(self.get_path(), RunDir.ANALYSIS_STATUS_PATH)
+        if not os.path.exists(analysis_status_path):
+            analysis_status = self.ANALYSIS_STATUS_NONE
+
+        # If no lane given, look at all lanes for status.
+        elif lane is None:
+            # Read all lanes of status.  Result across them is the earliest of all.
+            analysis_status = self.ANALYSIS_STATUS_MAX_INDEX
+            for lane in range(1,self.get_lanes()+1):
+                lane_status = self.get_analysis_status(lane)
+                if lane_status < analysis_status:
+                    analysis_status = lane_status
+
+        # Lane-specific status request.
+        else:
+            analysis_status = None
+            lane_str = "Lane%d" % lane
+            for status in range(self.ANALYSIS_STATUS_STARTED, self.ANALYSIS_STATUS_MAX_INDEX):
+                status_file = re.sub("LANE",lane_str,
+                                     self.ANALYSIS_STATUS_ARRAY[status][self.ANALYSIS_STATUS_IDX_FILENAME])
+                status_path = os.path.join(analysis_status_path, status_file)
+                if os.path.exists(status_path):
+                    analysis_status = status
+
+        return analysis_status
+
+    def get_analysis_status_string(self, lane=None, human_readable=True):
+
+        analysis_status = self.get_analysis_status(lane)
+
+        if human_readable:
+            analysis_status_str = self.ANALYSIS_STATUS_ARRAY[analysis_status][self.ANALYSIS_STATUS_IDX_HUMAN_STRING]
+        else:
+            analysis_status_str = self.ANALYSIS_STATUS_ARRAY[analysis_status][self.ANALYSIS_STATUS_IDX_COMP_STRING]
+
+        if lane is not None:
+            analysis_status_str = re.sub("LANE","Lane %d" % lane, analysis_status_str)
+        else:
+            analysis_status_str = re.sub("LANE ","", analysis_status_str)
+
+        return analysis_status_str
+
+    def set_analysis_status(self, lane, new_status):
+
+        # This method does not enforce the hierarchy: i.e., it won't check for or put
+        # BCL and Mapping status files down if the request is for a new Publish status.
+
+        # If no analysis status directory, make one.
+        analysis_status_path = os.path.join(self.get_path(), RunDir.ANALYSIS_STATUS_PATH)
+        if not os.path.exists(analysis_status_path):
+            os.makedirs(analysis_status_path)
+
+        status_file = RunDir.ANALYSIS_STATUS_ARRAY[new_status][RunDir.ANALYSIS_STATUS_IDX_FILENAME]
+        if status_file is not None:
+            if lane is not None:
+                status_file = re.sub("LANE", "Lane%d" % lane, status_file)
+            fp = open(os.path.join(analysis_status_path, status_file), "w")
+            fp.close()
+
+
+    def unset_analysis_status(self, lane, new_status):
+
+        # This method does not enforce the hierarchy: i.e., it won't check for or remove
+        # BCL and Mapping status files if the request is for a new Publish status.
+
+        # If no analysis status directory, do nothing.
+        analysis_status_path = os.path.join(self.get_path(), RunDir.ANALYSIS_STATUS_PATH)
+        if not os.path.exists(analysis_status_path):
+            return
+
+        status_file = RunDir.ANALYSIS_STATUS_ARRAY[new_status][RunDir.ANALYSIS_STATUS_IDX_FILENAME]
+        if status_file is not None:
+            if lane is not None:
+                status_file = re.sub("LANE", "Lane%d" % lane, status_file)
+            status_path = os.path.join(analysis_status_path, status_file)
+            if os.path.exists(status_path):
+                os.remove(status_path)
+
 
     def is_valid(self):
         has_runinfo = os.path.exists(os.path.join(self.get_path(),"RunInfo.xml"))
@@ -527,6 +713,14 @@ class RunDir:
         self.index_read = indexed_reads
 
     def get_reads_cycles_from_runparameters(self):
+			"""
+			Funciton : 
+			Returns  : tuple of 4 items being:
+									1) int. number of read types (i.e. for forward read, index read, index2 read, reverse read),
+									2) list where each element is an int indicating the number of cycles for the corresponding read,
+ 									3) bool indicating whether the run is PE, and
+									4) bool indicating whether the run has at least one index read.
+			"""
 
         reads = 0
         pairedend_run = False
@@ -956,9 +1150,9 @@ if __name__ == "__main__":
     parser.add_option("-v", "--validate", dest="validate", action="store_true",
                       default=False,
                       help='Run validation on run directory [default = false]')
-    parser.add_option("-c", "--no_cif", dest="no_cif", action="store_true",
+    parser.add_option("-c", "--cif", dest="cif", action="store_true",
                       default=False,
-                      help='When validating, ignore .cif files [default = false]')
+                      help='When validating, include .cif files [default = False]')
     parser.add_option("-d", "--diskUsage", dest="disk_usage", action="store_true",
                       default=False,
                       help='Display the disk usage for the run directory [default = false]')
@@ -983,7 +1177,7 @@ if __name__ == "__main__":
         if opts.validate:
             print
             if rundir.get_status() != RunDir.STATUS_RUN_ABORTED:
-                if rundir_utils.validate(rundir,no_cif=opts.no_cif,verbose=True):
+                if rundir_utils.validate(rundir,cif=opts.cif,verbose=True):
                     print "%s validated" % dir
                 else:
                     print "%s has problems" % dir
