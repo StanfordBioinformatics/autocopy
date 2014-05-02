@@ -713,14 +713,14 @@ class RunDir:
         self.index_read = indexed_reads
 
     def get_reads_cycles_from_runparameters(self):
-			"""
-			Funciton : 
-			Returns  : tuple of 4 items being:
-									1) int. number of read types (i.e. for forward read, index read, index2 read, reverse read),
-									2) list where each element is an int indicating the number of cycles for the corresponding read,
- 									3) bool indicating whether the run is PE, and
-									4) bool indicating whether the run has at least one index read.
-			"""
+        """
+        Funciton :
+        Returns  : tuple of 4 items being:
+                 1) int. number of read types (i.e. for forward read, index read, index2 read, reverse read),
+                 2) list where each element is an int indicating the number of cycles for the corresponding read,
+                 3) bool indicating whether the run is PE, and
+                 4) bool indicating whether the run has at least one index read.
+        """
 
         reads = 0
         pairedend_run = False

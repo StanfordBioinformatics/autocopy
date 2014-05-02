@@ -717,7 +717,7 @@ def make_archive_tar(rundir, **opts):
 
         # Control which files get into the tar.
         tar_cmd_list.extend(["--exclude", "Images", "--exclude", "Thumbnail_Images"])
-        if ! opts['cif']:
+        if not opts['cif']:
             tar_cmd_list.extend(["--exclude", "Data/Intensities/L00*/C*"])
 
         tar_cmd_list.extend(["-c", "-z"])

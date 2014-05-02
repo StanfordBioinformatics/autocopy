@@ -332,7 +332,7 @@ def start_copy(rundir, rsync=True):
                      "--dest_root", COPY_DEST_RUN_ROOT,
                      "--status_file", RunDir.STATUS_FILES[RunDir.STATUS_COPY_COMPLETE],
                      "--ssh_socket", SSH_SOCKET_CLUSTER,
-										 ]
+                    ]
 
     if rsync:
         copy_cmd_list.append("--rsync")
