@@ -221,7 +221,7 @@ if not opts.rsync:
     tar_cmd_list = ["gnutar", # "-C", run_path_root,
                     "--exclude", "Images", "--exclude", "Thumbnail_Images"]
 
-    if ! opts.cif:
+    if not opts.cif:
         tar_cmd_list.extend(["--exclude", "Data/Intensities/L00*/C*"])
 
     if opts.verbose:
@@ -252,7 +252,7 @@ else:
     rsync_cmd_list = ["rsync", "-rlptRc", "-e", "ssh -S %s -l %s" % (SSH_CM_SOCKET, opts.user),
                       "--exclude=Thumbnail_Images/", "--chmod=Dug=rwX,Do=rX,Fug=rw,Fo=r"]
 
-    if ! opts.cif:
+    if not opts.cif:
         rsync_cmd_list.append("--exclude=Data/Intensities/L00*/C*/")
 
     if opts.verbose:
