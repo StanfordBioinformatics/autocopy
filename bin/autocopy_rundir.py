@@ -605,7 +605,11 @@ def phase1_scan_run_roots():
                 else:
                     # Compare LIMS run record field against RunDir information.
                     check_lims_msg = lims_obj.lims_run_check_rundir(new_rundir, lims_run_fields, check_local_run_dir=True)
-                    if check_lims_msg.startswith("RunDir software hcs_2_0") or not check_lims_msg:
+                    hcs = False
+                    if check_lims_msg:
+                        if check_lims_msg.startswith("RunDir software hcs_2_0"): 
+                            hcs = True
+                    if hcs or not check_lims_msg:
                         lims_status = STATUS_LIMS_OK
                     else:
                         log("LIMS run record for %s doesn't match Run Dir:" % entry)
@@ -954,9 +958,12 @@ def phase3_update_statuses():
 
         if lims_fields:
             check_lims_msg = lims_obj.lims_run_check_rundir(rundir, lims_fields, check_local_run_dir=True)
+            hcs = False
             if check_lims_msg: 
+              if check_lims_msg.startswith("RunDir software hcs_2_0"):
+                  hcs = True
               log("Lims message regarding rundir " + rundir.get_dir() + " returned from lims_obj.lims_run_check_rundir() in autocopy_rundir.py: " + str(check_lims_msg))
-            if check_lims_msg.startswith("RunDir software hcs_2_0") or not check_lims_msg:
+            if hcs or not check_lims_msg:
                 if lims_status != STATUS_LIMS_OK:
                     log("Found LIMS run record for %s" % rundir.get_dir())
                     lims_status = STATUS_LIMS_OK
