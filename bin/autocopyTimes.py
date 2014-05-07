@@ -26,10 +26,10 @@ include_skipped = opts.include_skipped
 
 header = "RunName\tStartDate\tFinishDate\tCopyTime(hours)\n"
 mode = "w"
-newOutfile = False
+newOutfile = True
 if os.path.exists(outfile):
   mode = "a"
-  newOutfile = True
+  newOutfile = False
 
 fout = open(outfile,mode)
 if newOutfile:
