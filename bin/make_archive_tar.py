@@ -68,7 +68,7 @@ parser.add_option("-f", "--skipFileCheck", dest="skipFileCheck", action="store_t
 parser.add_option("-d", "--destDir", dest="destDir", type="string",
                   default=None,
                   help='Where should the resulting tar file go? [default = root dirs of run directories]')
-parser.add_option("-c", "cif", dest="cif", action="store_true",
+parser.add_option("-c", "--cif", dest="cif", action="store_true",
                   default=False,
                   help='Tar the intensity files (.cif) [default = false]')
 parser.add_option("-s", "--ssh_socket", dest="ssh_socket", type="string",
