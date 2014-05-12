@@ -52,7 +52,7 @@ for d in dirs:
   minutes = diff/60.0
   hours = "%.2f" % (minutes/60.0)
   fout.write(runname + "\t")
-  fout.write(str(datetime.date.fromtimestamp(mtime_acs)) + "\t")
-  fout.write(str(datetime.date.fromtimestamp(mtime_acc)) + "\t") 
+  fout.write(str(datetime.datetime.fromtimestamp(mtime_acs)) + "\t")
+  fout.write(str(datetime.datetime.fromtimestamp(mtime_acc)) + "\t") 
   fout.write(str(hours) + "\n")
 fout.close()
