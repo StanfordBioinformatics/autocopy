@@ -73,7 +73,7 @@ MAX_COPY_PROCESSES = 2
 COPY_DEST_HOST  = "crick.stanford.edu"
 COPY_DEST_USER  = pwd.getpwuid(os.getuid()).pw_name
 COPY_DEST_GROUP = "scg-admin"
-COPY_DEST_RUN_ROOT = "/srv/gsfs0/projects/gbsc/SeqCenter/Illumina/RunsInProgress"
+COPY_DEST_RUN_ROOT = "/srv/gsfs0/projects/seq_center/Illumina/RunsInProgress"
 COPY_COMPLETED_FILE = RunDir.STATUS_FILES[RunDir.STATUS_COPY_COMPLETE] # "Autocopy_complete.txt"
 
 # The name of the executable which copies the run directories to their
@@ -83,7 +83,7 @@ COPY_PROCESS_EXEC = "copy_rundir.py"
 COPY_PROCESS_EXEC = os.path.join(os.path.dirname(__file__), COPY_PROCESS_EXEC)
 
 # Where to archive the run directories to.
-ARCH_DEST_RUN_ROOT = "/srv/gsfs0/projects/gbsc/SeqCenter/Illumina/RawDataArchive"
+ARCH_DEST_RUN_ROOT = "/srv/gsfs0/projects/seq_center/Illumina/RunsInProgress"
 # The name of the executable which archives the run directories.
 ARCH_PROCESS_EXEC = "make_archive_tar.py"
 # Add the directory of this script to the path to the executable.
