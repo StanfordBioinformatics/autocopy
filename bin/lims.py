@@ -487,8 +487,8 @@ class LIMS:
                     check_msg += "RunDir local run dir root %s does not match LIMS local run dir root %s\n" % (rundir.get_root(), lims_run_root)
 
         # Check sequencer kit version.
-        if rundir.get_seq_kit_version() != field_dict['seq_kit_version']:
-            check_msg += "RunDir sequencer kit %s does not match LIMS sequencer kit %s\n" % (rundir.get_seq_kit_version(), field_dict['seq_kit_version'])
+#        if rundir.get_seq_kit_version() != field_dict['seq_kit_version']:
+#            check_msg += "RunDir sequencer kit %s does not match LIMS sequencer kit %s\n" % (rundir.get_seq_kit_version(), field_dict['seq_kit_version'])
 
         # Prepare for checking RunDir's sequencer software.
         sw_version = rundir.get_control_software_version()
