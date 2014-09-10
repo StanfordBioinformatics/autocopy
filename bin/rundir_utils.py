@@ -713,7 +713,7 @@ def make_archive_tar(rundir, **opts):
         #
         # Compress and tar the directory into a temporary file.
         #
-        tar_cmd_list = ["gnutar", "-C", rundir.get_root()]
+        tar_cmd_list = ["tar", "-C", rundir.get_root()]
 
         # Control which files get into the tar.
         tar_cmd_list.extend(["--exclude", "Images", "--exclude", "Thumbnail_Images"])
