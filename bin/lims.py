@@ -369,7 +369,7 @@ class LIMS:
 
         # Execute the rake command.
         if verbose:
-            print >> sys.stderr, rake_cmd_list
+            print >> sys.stderr, " ".join(rake_cmd_list)
 
         rake_popen = subprocess.Popen(rake_cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         (rake_stdout, rake_stderr) = rake_popen.communicate()
@@ -453,7 +453,11 @@ class LIMS:
         #    check_msg += "RunDir start date %s does not match LIMS start date %s\n" % (rundir.get_start_date(), field_dict['start_date'])
 
         # Check sequencing instrument.
-        if rundir.get_machine().lower() != field_dict['seq_instrument'].lower():
+        machine = rundir.get_machine()
+        if machine:
+            machine = machine.lower()
+        seq_inst = field_dict['seq_instrument'].lower()
+        if machine != seq_inst:
             check_msg += "RunDir machine %s does not match LIMS seq instrument %s\n" % (rundir.get_machine(), field_dict['seq_instrument'])
 
         if check_local_run_dir:

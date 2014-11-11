@@ -1,5 +1,4 @@
 #!/bin/bash
 
-
-sudo launchctl load AutocopyDaemon.plist
-sudo launchctl start AutocopyDaemon
+launchctl load AutocopyDaemon.plist
+launchctl start AutocopyDaemon
