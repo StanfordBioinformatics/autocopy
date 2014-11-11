@@ -189,6 +189,7 @@ class RunDir:
     # Constructor
     ###
     def __init__(self, root, directory):
+        print("root is {root},dir is {directory}".format(root=root,directory=directory))
         self.root = root
         self.dir = directory
 

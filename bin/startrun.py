@@ -109,6 +109,7 @@ for run_name in args:
             pipeline_id = max_id
     else:
         pipeline_id = opts.pipeline_id
+    print("Pipeline ID is: {pipeline_id}".format(pipeline_id=pipeline_id))
 
     if not opts.reverse:
         if lims_obj.lims_pipeline_modify(pipeline_id, {'started': True}):
