@@ -25,6 +25,16 @@ import rundir_utils
 #
 class RunDir:
 
+    # LIMS Statuses for RunDirs.                                                                                                                                                                           
+    STATUS_LIMS_OK = 0
+    STATUS_LIMS_MISSING  = 1
+    STATUS_LIMS_MISMATCH = 2
+
+    # Fields used by autocopy_rundir
+    cached_rundir_status = None
+    cached_lims_run_status = None
+    cached_lims_runinfo = None
+
     ###
     # CONSTANTS
     ###
