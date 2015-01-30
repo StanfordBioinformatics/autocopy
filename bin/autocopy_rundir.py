@@ -2,7 +2,8 @@
 
 ###############################################################################
 #
-# autocopy_rundir.py - Copy run directories to the cluster as they are created.
+# autocopy_rundir.py - Copy sequencing run directories from a local data store
+#   to a remote server
 #
 # ARGS:
 #   all: Directories below which to monitor for run directories.
@@ -22,6 +23,48 @@
 #   Keith Bettinger, Nathan Hammond
 #
 ###############################################################################
+
+# Developer notes
+#   1. Keep this program as stateless as possible. All important info goes
+#      in the run directory or the LIMS.
+#      a. The state of a RunDir (AUTOCOPY_STARTED, etc.) is stored as a sentinel 
+#         file dropped by rundir.py. When autocopy is restarted, RunDir state is 
+#         read from sentinal files.
+#      b. No LIMS info is stored by autocopy, to avoid getting out of sync. Query, 
+#         use, forget.
+#      c. However, autocopy rundir does remember which directories it has already 
+#         seen, stored as a list of RunDirs AutocopyRundir.rundirs_monitored. This 
+#         is useful for sending an email upon discovering a new run. When AutoCopy 
+#         is restarted those emails will be resent as runs are added to 
+#         rundirs_monitored, after which state is the same as before.
+#   2. Don't crash if you can avoid it, and err on the side of start_copy rather than
+#      waiting for operator intervention. When LIMS is unavailable, a warning should 
+#      be logged and emailed, but autocopy should continue as normal.
+#   3. Emails should be explicit about the action required by the operator
+#   4. Unittests can by run with test/test_autocopyrundir.py. Keep them up to date 
+#      when changing autocopy. 
+#      a. For testing LIMS connections, tests use the scgpm_lims --local_only option, 
+#         which simulates a LIMS connection using flatfile data checked into the 
+#         scgpm_lims repository. For new tests that need specific LIMS data, check 
+#         LIMS data into scgpm_lims test data rather than depending on the state of 
+#         data in the production or staging LIMS.
+#   5. Three modes of external communication. Each may be disabled for testing via
+#      --no_copy, --no_mail, and --test_mode_lims
+#      a. Communication with the LIMS is managed by the scgpm_lims class.
+#         Connection is HTTP or HTTPS. Uses these env variables:
+#           LIMS_URL, LIMS_TOKEN
+#      b. Communication with the Mandrill mail server via HTTPS. 
+#         Uses these env variables:
+#         AUTOCOPY_SMTP_USERNAME, AUTOCOPY_SMTP_TOKEN, 
+#         AUTOCOPY_SMTP_PORT, AUTOCOPY_SMTP_SERVER
+#      c. SSH copy
+#         An ssh port to the destination cluster is opened on startup, used by rsync
+#         for copying data to the cluster
+#         TODO how is dest data stored?
+#
+#  Installation notes
+#    1. Keys must be configured to allow passwordless ssh to DEST_HOST
+#    2. username must be the same on local and DEST_HOST
 
 import email.mime.text
 import datetime
@@ -43,16 +86,13 @@ class AutocopyRundir:
 
     LOG_DIR_DEFAULT = "/usr/local/log"
 
-    # Subdirectories to be created/used within each run root.
-    #   Archiving subdirectory, where run dirs are moved after they are reported as Archived in LIMS.
-    #   Aborted subdirectory, where run dirs are moved when they are reported as aborted.
-    SUBDIR_ARCHIVE = "Archived"
-    SUBDIR_ABORTED = "Aborted"
+    SUBDIR_COMPLETED = "CopyCompleted" # Runs are moved here after copy
+    SUBDIR_ABORTED = "RunAborted" # Runs are moved here if flagged 'sequencing_failed'
 
     LIMS_API_VERSION = 'v1'
 
-    # How many copy processes should be active simultaneously.
-    MAX_COPY_PROCESSES = 2
+    #TODO apply this cap
+    MAX_COPY_PROCESSES = 2 # Cap the number of copy procs
 
     EMAIL_TO = 'nhammond@stanford.edu'  #'scg-auto-notify@lists.stanford.edu'
     EMAIL_FROM = 'nathankw@stanford.edu'
@@ -71,8 +111,8 @@ class AutocopyRundir:
     ONEGIG  = ONEKILO * ONEMEG
     ONETERA = ONEKILO * ONEGIG
 
-    # What is the minimum amount of free space desired in a run root directory's partition?
-    MIN_FREE_SPACE = ONETERA * 2
+    # TODO notify for low space
+    MIN_FREE_SPACE = ONETERA * 2 # Warn when run_root space is below this value
 
     LOOP_DELAY_SECONDS = 600
 
@@ -136,23 +176,48 @@ class AutocopyRundir:
 
     def process_ready_for_copy_dirs(self):
         for rundir in self.get_ready_for_copy_dirs():
-            self.scan_rundir_for_missing_files(rundir)
-            self.check_rundir_against_lims(rundir)
             self.start_copy(rundir)
             rundir.set_status(RunDir.STATUS_COPY_STARTED)
 
     def process_copying_dirs(self):
-        # get them
-        # poll for status
-        #   None -> pass
-        #   O or 5 -> set status to complete
-        #   error -> ??
-        pass
+        for rundir in self.get_copying_dirs():
+            if not rundir.copy_proc:
+                # Indicates that a new RunDir was already in a Copy Started state
+                # Remove COPY_STARTED status file so copy can restart.
+                rundir.undrop_status_file()
+                rundir.copy_proc = None
+                rundir.copy_start_time = None
+                rundir.copy_end_time = None
+                self.log(rundir.get_dir(), "failed to copy and had no copy process attached")
+                self.log("Usually this is because Autocopy restarted while a copy was in progress")
+                self.log("Unsetting COPY_STARTED status to reattempt copy.")
+            else:
+                retcode = rundir.copy_proc.poll()
+                if retcode == 0:
+                    #TODO send one email per run, with info re flags
+                    self.scan_rundir_for_missing_files(rundir)
+                    self.check_rundir_against_lims(rundir)
+                    #    if run_fields and run_fields["sequencer_done"] != "yes":
+                    # LIMS: change Sequencer Done flag to "True".
+
+                    # DISK usage
+                    # LIMS sequencer_done flag -> True
+                    rundir.set_status(RunDir.STATUS_COPY_COMPLETE)
+                    rundir.copy_proc = None
+                    rundir.copy_end_time = datetime.datetime.now()
+                elif retcode == None:
+                    # Still copying. Do nothing.
+                    pass
+                else:
+                    # TODO email notice that copy failed.
+                    rundir.set_status(RunDir.STATUS_COPY_FAILED)
 
     def process_completed_dirs(self):
-        # update LIMS
-        # move to Completed
-        pass
+        for rundir in self.get_completed_rundirs():
+            log("%s copy is complete. Moving to %s. It can be deleted." % (
+                rundir.get_dir(), os.path.join(rundir.get_root(), self.SUBDIR_COMPLETED)))
+            self.rundirs_monitored.remove(rundir_status)
+            os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_COMPLETED,rundir.get_dir()))
 
     def process_aborted_dirs(self):
         # How did we get here exactly? Is this anybody with sequencing_failed?
@@ -469,96 +534,6 @@ class AutocopyRundir:
             self.send_email_new_rundir(new_rundir, run_root)
 """
 
-    def examine_copying_dirs(self):
-
-        copying_rundirs = self.get_copying_rundirs()
-
-        for rundir in copying_rundirs:
-            # If we have a copy process running (and we should: each RunDir here should have one),
-            #  check to see if it ended happily, and change status to COPY_COMPLETE if it did.
-            if rundir.copy_proc:
-                retcode = rundir.copy_proc.poll()
-                if retcode == 0:
-                    is_rundir_valid = self.is_rundir_valid(rundir)
-                    self.update_status_copy_complete(rundir)
-                    self.send_email_rundir_copy_complete_complete(rundir, is_rundir_valid)
-
-#                    TODO
-#                    if is_rundir_valid:
-                        # Check for active run record for this run directory.
-                    #    run_fields = lims_obj.lims_run_get_fields(rundir)
-                    #    if run_fields and run_fields["sequencer_done"] != "yes":
-                            #
-                            # LIMS: change Sequencer Done flag to "True".
-                            #
-                    #        seq_done_dict = {'sequencer_done': 'yes'}
-                    #        if lims_obj.lims_run_modify_params(rundir.get_dir(), seq_done_dict):
-                    #            log("LIMS: Set Sequencer Done flag of %s to True" % rundir.get_dir())
-                    #        else:
-                    #            log("LIMS: COULD NOT Set Sequencer Done flag of %s to True" % rundir.get_dir())
-                                
-                            #
-                            # LIMS: change Flowcell Status to "Analyzing".
-                            #
-                    #        if lims_obj.lims_flowcell_modify_status(name=rundir.get_flowcell(),status='analyzing'):
-                    #            log("Set Flowcell Status of %s (%s) to 'analyzing'" % (rundir.get_dir(), rundir.get_flowcell()))
-                    #        else:
-                    #            log("COULD NOT Set Flowcell Status of %s (%s) to 'analyzing'" % (rundir.get_dir(), rundir.get_flowcell()))
-
-                elif retcode == 5:
-                    #TODO
-                    pass
-                    # Run directory already exists at destination.
-
-                    # If LIMS says "Sequencer Done", assume success.
-#                run_fields = lims_obj.lims_run_get_fields(rundir)
-#                if run_fields and run_fields["sequencer_done"] == "yes":
-#                    rundir.status = RunDir.STATUS_COPY_COMPLETE
-#                    rundir.drop_status_file()
-#                    rundir.copy_proc = None
-#                    rundir.copy_end_time = datetime.datetime.now()
-
-#                    log("Copy of", rundir.get_dir(), "already done.")
-#                else:
-                    # Else start_copy with rsync.
-#                    start_copy(rundir, rsync=True)
-#                    log("Restarting copy of", rundir.get_dir(), "with rsync.")
-
-                elif retcode: # is not None
-                    # Copy failed, change to COPY_FAILED state.
-                    rundir.copy_proc = None
-                    rundir.copy_start_time = None
-                    rundir.copy_end_time = None
-
-                    rundir.status = RunDir.STATUS_COPY_FAILED
-                    rundir.drop_status_file()
-
-                    self.send_email_copy_failed(rundir, retcode)
-
-                else:    # retcode == None
-                    # Copy process is still running...
-                    pass
-            else:
-                # If we have a RunDir in this list with no process associated, must mean that a
-                # new run dir was already in a "Copy Started" state.
-
-                # Remove COPY_STARTED file.
-                rundir.undrop_status_file()  # Remove "Copy_started.txt"
-                rundir.copy_proc = None
-                rundir.copy_start_time = None
-                rundir.copy_end_time = None
-                self.log("Copy of", rundir.get_dir(), "failed with no copy process attached -- previously started?")
-
-    def update_status_copy_complete(self, rundir):
-
-        # Copy succeeded: advance to Copy Complete.
-        rundir.status = RunDir.STATUS_COPY_COMPLETE
-        rundir.drop_status_file()
-        rundir.copy_proc = None
-        rundir.copy_end_time = datetime.datetime.now()
-        self.log("Copy of", rundir.get_dir(), "completed successfully [ time taken",
-                 strftdelta(rundir.copy_end_time - rundir.copy_start_time), "].")
-
     def send_email_invalid_rundir(self, rundir):
         email_body = "MISSING FILES IN RUN:\t%s\n" %rundir.get_dir()
         email_body += "Location:\t%s:%s/%s\n\n" % (self.HOSTNAME, rundir.get_root(), rundir.get_dir())
@@ -872,11 +847,19 @@ class AutocopyRundir:
             if not os.path.exists(run_root):
                 os.makedirs(run_root, 0775)
             aborted_subdir = os.path.join(run_root, self.SUBDIR_ABORTED)
-            archive_subdir = os.path.join(run_root, self.SUBDIR_ARCHIVE)
+            completed_subdir = os.path.join(run_root, self.SUBDIR_COMPLETED)
             if not os.path.exists(aborted_subdir):
                 os.mkdir(aborted_subdir, 0775)
-            if not os.path.exists(archive_subdir):
-                os.mkdir(archive_subdir, 0775)
+            if not os.path.exists(completed_subdir):
+                os.mkdir(completed_subdir, 0775)
+            self.leave_ok_to_delete_readme(aborted_subdir)
+            self.leave_ok_to_delete_readme(completed_subdir)
+
+    def leave_ok_to_delete_readme(self, directory):
+        readme = os.path.join(directory, 'README.txt')
+        if not os.path.exists(readme):
+            with open(readme, 'w') as f:
+                f.write('Runs in this directory are generally OK to delete.')
 
     def send_email(self, to, subj, body, log=True):
         # Add a prefix to the subject line, and substitute the host here for "%m".

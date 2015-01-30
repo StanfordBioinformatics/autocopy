@@ -76,8 +76,8 @@ class TestAutocopyRundir(unittest.TestCase):
     def testCreateSubdirs(self):
         run_root = os.path.join(self.tmp_dir, 'run1')
         a = AutocopyRundir(run_root_list=[run_root], redirect_stdout_stderr_to_log=False, no_mail=True, test_mode_lims=True)
-        self.assertTrue(os.path.exists(os.path.join(run_root, 'Archived')))
-        self.assertTrue(os.path.exists(os.path.join(run_root, 'Aborted')))
+        self.assertTrue(os.path.exists(os.path.join(run_root, 'CopyCompleted')))
+        self.assertTrue(os.path.exists(os.path.join(run_root, 'RunAborted')))
 
     def testLog(self):
         a = AutocopyRundir(run_root_list=[self.tmp_dir], log_file=self.tmp_file.name, redirect_stdout_stderr_to_log=False, no_mail=True, test_mode_lims=True)
@@ -165,12 +165,30 @@ class TestAutocopyRundir(unittest.TestCase):
             text = f.read()
         self.assertTrue(re.search("Hello", text))
 
+#    def testProcessReadyForCopyDirs(self):
+#        source_run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
+#        source_rundir = os.path.join(source_run_root, run_name)
 
-    def testSetStatus(self):
-        pass
+#        dest_run_root = os.path.join(self.tmp_dir, 'dest')
+#        dest_host = 'localhost'
+#        dest_group = grp.getgrgid(pwd.getpwuid(os.getuid()).pw_gid).gr_name
+#        dest_user = pwd.getpwuid(os.getuid()).pw_name
+#        os.makedirs(dest_run_root)
 
-    def testReadyForCopyDirs(self):
-        pass
+        # Initialize autocopy and create the source root
+#        a = AutocopyRundir(log_file=self.tmp_file.name, run_root_list=[source_run_root], redirect_stdout_stderr_to_log=False, no_mail=True, test_mode_lims=True)
+
+#        a.cleanup_ssh_socket()
+#        a.COPY_DEST_HOST  = dest_host
+#        a.COPY_DEST_USER  = dest_user
+#        a.COPY_DEST_GROUP = dest_group
+#        a.COPY_DEST_RUN_ROOT = dest_run_root
+#        a.initialize_ssh_socket()
+
+#        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
+
+#        rundirs = self.get_ready_for_copy_dirs()
+#        self.assertEqual(len(rundirs, 2))
 
     def testGetCopyingRundirs(self):
         run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
