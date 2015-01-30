@@ -2,7 +2,7 @@
 
 ###############################################################################
 #
-# autocopy_rundir.py - Copy sequencing run directories from a local data store
+# autocopy.py - Copy sequencing run directories from a local data store
 #   to a remote server
 #
 # ARGS:
@@ -33,15 +33,18 @@
 #      b. No LIMS info is stored by autocopy, to avoid getting out of sync. Query, 
 #         use, forget.
 #      c. However, autocopy rundir does remember which directories it has already 
-#         seen, stored as a list of RunDirs AutocopyRundir.rundirs_monitored. This 
-#         is useful for sending an email upon discovering a new run. When AutoCopy 
-#         is restarted those emails will be resent as runs are added to 
-#         rundirs_monitored, after which state is the same as before.
+#         seen, stored as a list of RunDirs Autocopy.rundirs_monitored. The 
+#         RunDir objects themselves have no state--they can be regenerated from the 
+#         run directories on disk. The only information unique to autocopy is whether
+#         a RunDir object is stored in rundirs_monitored, which indicates that the
+#         run was examined previously and a "newly discovered run" email messages
+#         may have been sent. When Autocopy is restarted those emails will be re-sent
+#         as runs are added to rundirs_monitored, after which state is the same as before.
 #   2. Don't crash if you can avoid it, and err on the side of start_copy rather than
 #      waiting for operator intervention. When LIMS is unavailable, a warning should 
 #      be logged and emailed, but autocopy should continue as normal.
 #   3. Emails should be explicit about the action required by the operator
-#   4. Unittests can by run with test/test_autocopyrundir.py. Keep them up to date 
+#   4. Unittests can by run with test/test_autocopy.py. Keep them up to date 
 #      when changing autocopy. 
 #      a. For testing LIMS connections, tests use the scgpm_lims --local_only option, 
 #         which simulates a LIMS connection using flatfile data checked into the 
@@ -59,8 +62,9 @@
 #         AUTOCOPY_SMTP_PORT, AUTOCOPY_SMTP_SERVER
 #      c. SSH copy
 #         An ssh port to the destination cluster is opened on startup, used by rsync
-#         for copying data to the cluster
-#         TODO how is dest data stored?
+#         for copying data to the cluster. The following settings control the copy step
+#         and can be set in a config.json file:
+#           COPY_DEST_HOST, COPY_DEST_USER, COPY_DEST_GROUP, COPY_DEST_RUN_ROOT
 #
 #  Installation notes
 #    1. Keys must be configured to allow passwordless ssh to DEST_HOST
@@ -68,6 +72,8 @@
 
 import email.mime.text
 import datetime
+import grp
+import json
 from optparse import OptionParser
 import os
 import pwd
@@ -82,9 +88,12 @@ from rundir import RunDir
 import rundir_utils
 from scgpm_lims.connection import Connection, RunInfo
 
-class AutocopyRundir:
+class ValidationError(Exception):
+    pass
 
-    LOG_DIR_DEFAULT = "/usr/local/log"
+class Autocopy:
+
+    LOG_DIR_DEFAULT = '/var/log'
 
     SUBDIR_COMPLETED = "CopyCompleted" # Runs are moved here after copy
     SUBDIR_ABORTED = "RunAborted" # Runs are moved here if flagged 'sequencing_failed'
@@ -94,16 +103,15 @@ class AutocopyRundir:
     #TODO apply this cap
     MAX_COPY_PROCESSES = 2 # Cap the number of copy procs
 
-    EMAIL_TO = 'nhammond@stanford.edu'  #'scg-auto-notify@lists.stanford.edu'
-    EMAIL_FROM = 'nathankw@stanford.edu'
+    EMAIL_TO = None
+    EMAIL_FROM = None
     EMAIL_SUBJ_PREFIX = 'AUTOCOPY (%m): '
 
-    # Where to copy the run directories to.
-    COPY_DEST_HOST  = "crick.stanford.edu"
+    # Where to copy the run directories
+    COPY_DEST_HOST  = 'localhost'
     COPY_DEST_USER  = pwd.getpwuid(os.getuid()).pw_name
-    COPY_DEST_GROUP = "scg-admin"
-    COPY_DEST_RUN_ROOT = "/srv/gsfs0/projects/seq_center/Illumina/RunsInProgress"
-    COPY_COMPLETED_FILE = RunDir.STATUS_FILES[RunDir.STATUS_COPY_COMPLETE] # "Autocopy_complete.txt"
+    COPY_DEST_GROUP = grp.getgrgid(pwd.getpwuid(os.getuid()).pw_gid).gr_name
+    COPY_DEST_RUN_ROOT = '/data'
 
     # Powers of two constants
     ONEKILO = 1024.0
@@ -120,9 +128,16 @@ class AutocopyRundir:
     COPY_PROCESS_EXEC = "copy_rundir.py"
     COPY_PROCESS_EXEC = os.path.join(os.path.dirname(__file__), COPY_PROCESS_EXEC)
 
-    def __init__(self, run_root_list = None, log_file=None, no_copy=False, no_lims=False, redirect_stdout_stderr_to_log=True, no_mail=False, test_mode_lims=False):
-        # Some options are for testing only and not available from the commandline:
+    def __init__(self, run_root_list = None, log_file=None, no_copy=False, no_lims=False, redirect_stdout_stderr_to_log=True, no_mail=False, test_mode_lims=False, config=None):
+        # Some options are for testing only and not available from the commandline
         #   redirect_stdout_stderr_to_log, no_mail
+
+        if config is None:
+            if os.path.exists(os.path.join(os.path.dirname(__file__), 'config.json')):
+                with open(os.path.join(os.path.dirname(__file__), 'config.json')) as f:
+                    config = json.load(f)
+
+        self.override_settings_with_config(config)
 
         # If run root dirs not provided, use current directory
         if not run_root_list:
@@ -255,7 +270,7 @@ class AutocopyRundir:
                 smtp_token = raw_input("SMTP token: ")
 
         if not (smtp_server and smtp_port and smtp_username and smtp_token):
-            raise Exception('SMTP server settings are required')
+            raise ValidationError('SMTP server settings are required')
 
         sys.stdout.write("Connecting to mail server...")
         self.smtp = smtplib.SMTP(smtp_server, smtp_port, timeout=5)
@@ -277,8 +292,10 @@ class AutocopyRundir:
         for run_root in self.RUN_ROOT_LIST:
             for dirname in os.listdir(run_root): # Directories on disk
                 # Include only directories that begin with a 6-digit start date
+                # Exclude special subdirs
                 if (os.path.isdir(os.path.join(run_root, dirname)) and
-                    re.match("\d{6}_", dirname)):
+                    re.match("\d{6}_", dirname) and
+                    dirname not in [self.SUBDIR_COMPLETED, self.SUBDIR_ABORTED]):
                     new_rundirs_monitored.append(self.retrieve_or_create_rundir(run_root, dirname, remove=True))
 
         for missing_rundir in self.rundirs_monitored:
@@ -335,115 +352,10 @@ class AutocopyRundir:
         self.send_email_check_rundir_against_lims(rundir, problems_found)
         return problems_found
 
-
-    """
-            ['hostname
-            #
-            # Check local run dir.
-            #
-            if field_dict['local_run_dir']:
-                hostpath_split = field_dict['local_run_dir'].split(":")
-                if len(hostpath_split) == 2:
-                    lims_hostname = hostpath_split[0]
-                    lims_run_root = hostpath_split[1]
-                else:
-                    lims_hostname = None
-                    lims_run_root = hostpath_split[0]
-
-                # Compare possible hostname in LIMS local_run_dir to this host.
-                if lims_hostname and lims_hostname != HOSTNAME:
-                    check_msg += "RunDir local run dir hostname %s does not match LIMS local run dir hostname %s\n" % (HOSTNAME, lims_hostname)
-
-                # Compare run roots.
-                if rundir.get_root() != lims_run_root:
-                    check_msg += "RunDir local run dir root %s does not match LIMS local run dir root %s\n" % (rundir.get_root(), lims_run_root)
-
-        # Check sequencer kit version.
-#        if rundir.get_seq_kit_version() != field_dict['seq_kit_version']:
-#            check_msg += "RunDir sequencer kit %s does not match LIMS sequencer kit %s\n" % (rundir.get_seq_kit_version(), field_dict['seq_kit_version'])
-
-        # Prepare for checking RunDir's sequencer software.
-        sw_version = rundir.get_control_software_version()
-        if sw_version:
-            if rundir.get_platform() == rundir.PLATFORM_ILLUMINA_GA:
-                seq_software = 'scs_%s' % sw_version[:3].replace('.','_')
-            elif rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ:
-                if sw_version == "1.3.8" or \
-                   sw_version == "1.4.8" or \
-                   sw_version == "1.5.15":
-                    seq_software = 'hcs_%s' % sw_version.replace('.','_')
-                elif sw_version.startswith("1.3.8") or \
-                     sw_version.startswith("1.4.8"):
-                    seq_software = 'hcs_%s' % sw_version[:5].replace('.','_')
-                elif sw_version.startswith("1.5.15"):
-                    seq_software = 'hcs_%s' % sw_version[:6].replace('.','_')
-                else:
-                    seq_software = 'hcs_%s' % sw_version[:3].replace('.','_')
-            elif rundir.get_platform() == rundir.PLATFORM_ILLUMINA_MISEQ:
-                seq_software = "mcs_%s" % sw_version.replace('.','_')
-            else:
-                print >> sys.stderr, "WARNING: platform unknown (%s)" % rundir.get_platform()
-                seq_software = None
-        else:
-            seq_software = None
-
-        # Check software version.
-        if seq_software != field_dict['seq_software']:
-            check_msg += "RunDir software %s does not match LIMS software %s\n" % (seq_software, field_dict['seq_software'])
-
-        # Check paired end.
-        paired_end = rundir.is_paired_end()
-        if ((paired_end and field_dict['paired_end'] != 'yes') or
-            (not paired_end and field_dict['paired_end'] == 'yes')):
-            check_msg += "RunDir paired end %s does not match LIMS paired end %s\n" % (paired_end, field_dict['paired_end'])
-
-        # Prepare to compare read cycles.
-        cycle_list = rundir.get_cycle_list()
-        read1_cycles = cycle_list[0]
-        if len(cycle_list) == 1:
-            read2_cycles = None
-        elif len(cycle_list) == 2:
-            if paired_end:
-                read2_cycles = cycle_list[1]
-            else:  # Two reads without paired end means second read is indexed read.
-                read2_cycles = None
-        elif len(cycle_list) == 3:
-            read2_cycles = cycle_list[2]
-        elif len(cycle_list) == 4:
-            read2_cycles = cycle_list[3]
-        else:
-            read2_cycles = None
-
-        # Check index read.
-        index_read = rundir.is_index_read()
-        if ((index_read and field_dict['index_read'] != 'yes') or
-            (not index_read and field_dict['index_read'] == 'yes')):
-            check_msg += "RunDir index read %s does not match LIMS index read %s\n" % (index_read, field_dict['index_read'])
-
-        # Check read1_cycles.
-        if read1_cycles != int(field_dict['read1_cycles']):
-            check_msg += "RunDir read1 cycles %s does not match LIMS read1 cycles %s\n" % (read1_cycles, field_dict['read1_cycles'])
-
-        # Prepare LIMS read2_cycles for comparison.
-        if len(field_dict['read2_cycles']) > 0:
-            lims_read2_cycles = int(field_dict['read2_cycles'])
-        else:
-            lims_read2_cycles = None
-
-        # Check read2_cycles.
-        if read2_cycles != lims_read2_cycles:
-            check_msg += "RunDir read2 cycles %s does not match LIMS read2 cycles %s\n" % (read2_cycles, lims_read2_cycles)
-
-        # Return the list of mismatch messages, if any.
-        if len(check_msg):
-            return check_msg
-        else:
-            return None
-        pass
-"""
-
     def cleanup_ssh_socket(self):
-        if not self.SSH_SOCKET:
+        if not hasattr(self, 'SSH_SOCKET'):
+            return
+        if self.SSH_SOCKET is None:
             return
         retcode = subprocess.call(["ssh", "-O", "exit", "-S", self.SSH_SOCKET, self.COPY_DEST_HOST],
                                   stdout=self.LOG_FILE, stderr=subprocess.STDOUT)
@@ -489,50 +401,6 @@ class AutocopyRundir:
                                             stdout=self.LOG_FILE, stderr=subprocess.STDOUT)
         rundir.copy_start_time = datetime.datetime.now()
         rundir.copy_end_time = None
-
-    """
-###
-
-        try:
-            runinfo = RunInfo(conn=self.LIMS, run=dirname)
-            self.log("Found LIMS run record for %s" % dirname)
-        except:
-            runinfo = None
-            self.log("No LIMS run record found for %s" % dirname)
-
-        # Check LIMS fields against new RunDir.
-        if runinfo:
-            #TODO
-            # Compare LIMS run record field against RunDir information.
-#                    check_lims_msg = lims_obj.lims_run_check_rundir(new_rundir, lims_run_fields, check_local_run_dir=True)
-#                    hcs = False
-#                    if check_lims_msg:
-#                        if check_lims_msg.startswith("RunDir software hcs_2_0"): 
-#                            hcs = True
-#                    if hcs or not check_lims_msg:
-#                        lims_status = STATUS_LIMS_OK
-#                    else:
-#                        log("LIMS run record for %s doesn't match Run Dir:" % entry)
-#                        for msg in check_lims_msg.split("\n"):
-#                            log(msg)
-#                        lims_status = STATUS_LIMS_MISMATCH
-            lims_run_status = RunDir.STATUS_LIMS_OK
-
-        # Save new RunDir object and its first statuses.
-        new_rundir.cached_rundir_status = new_rundir.get_status()
-        new_rundir.cached_lims_run_status = lims_run_status
-        new_rundir.cached_lims_runinfo = runinfo
-        self.active_rundirs.append(new_rundir)
-
-        # If this run has not been copied yet...
-        if new_rundir.get_status() < RunDir.STATUS_COPY_COMPLETE:
-
-            # Log the new directory.
-            self.log("Discovered new run %s (%s) " % (entry, new_rundir.get_status_string()))
-
-            # Email out the discovery.
-            self.send_email_new_rundir(new_rundir, run_root)
-"""
 
     def send_email_invalid_rundir(self, rundir):
         email_body = "MISSING FILES IN RUN:\t%s\n" %rundir.get_dir()
@@ -616,227 +484,6 @@ class AutocopyRundir:
             email_subj_prefix += "w/Missing Files "
             self.email_message(self.EMAIL_TO, email_subj_prefix + rundir.get_dir(), email_body)
 
-    def examine_archiving_dirs(self):
-        archiving_rundirs = self.get_archiving_dirs()
-        for rundir in archiving_rundirs:
-
-            # If we have a archive process running (and we should: each RunDir here should have one),
-            #  check to see if it ended happily, and change status to ARCHIVE_COMPLETE if it did.
-            if rundir.archive_proc:
-                self.LOG_FILE.flush()
-                retcode = rundir.archive_proc.poll()
-                if retcode == 0:
-                    # Archive succeeded: advance to Archive Complete.
-                    rundir.status = RunDir.STATUS_ARCHIVE_COMPLETE
-                    rundir.drop_status_file()
-                    rundir.archive_proc = None
-                    rundir.archive_end_time = datetime.datetime.now()
-
-                    # Send an email announcing the completed run directory archive.
-                    email_body  = "Run:\t\t\t%s\n" % rundir.get_dir()
-                    email_body += "Archive location:\t%s/YEAR/%s\n" % (ARCH_DEST_RUN_ROOT, rundir.get_root() + "*")
-                    email_body += "\n"
-                    email_body += "Archive time:\t\t%s\n" % strftdelta(rundir.archive_end_time - rundir.archive_start_time)
-
-                    email_subj_prefix = "Archived Run Dir "
-
-                    email_message(self.EMAIL_TO, email_subj_prefix + rundir.get_dir(), email_body)
-
-                    if False:
-                        #
-                        # LIMS: change Archiving Done flag to "True".
-                        #
-                        # WHAT IF NO RUN RECORD BY THIS POINT???
-                        #
-                        arch_done_dict = {'archiving_done': 'yes'}
-                        if lims_obj.lims_run_modify_params(rundir.get_dir(), arch_done_dict):
-                            log("LIMS: Set Archiving Done flag of %s to True" % rundir.get_dir())
-                        else:
-                            log("LIMS: COULD NOT Set Archiving Done flag of %s to True" % rundir.get_dir())
-
-                elif retcode: # is not None
-                    # Archive failed, change to ARCHIVE_FAILED state.
-                    rundir.archive_proc = None
-                    rundir.archive_start_time = None
-                    rundir.archive_end_time = None
-
-                    rundir.status = RunDir.STATUS_ARCHIVE_FAILED
-                    rundir.drop_status_file()
-
-                    # Send an email announcing the failed run directory archive.
-                    email_body  = "Run:\t\t\t%s\n" % rundir.get_dir()
-                    email_body += "Original Location:\t%s:%s\n" % (HOSTNAME, rundir.get_path())
-                    email_body += "\n"
-                    email_body += "FAILED TO ARCHIVE to:\t%s/YEAR/%s\n" % (ARCH_DEST_RUN_ROOT, rundir.get_dir())
-                    email_body += "Return code:\t%d\n" % retcode
-
-                    email_message(EMAIL_TO, "ERROR ARCHIVING Run Dir " + rundir.get_dir(), email_body)
-
-                else:    # retcode == None
-                    # Archive process is still running...
-                    pass
-            else:
-                # If we have a RunDir in this list with no process associated, must mean that a
-                # new run dir was already in a "Archive Started" state.
-
-                # Remove ARCHIVE_STARTED file.
-                rundir.undrop_status_file()  # Remove "Archive_started.txt"
-
-                rundir.archive_proc = None
-                rundir.archive_start_time = None
-                rundir.archive_end_time = None
-
-                self.log("Archive of", rundir.get_dir(), "failed with no archive process attached -- previously started?")
-
-    def update_statuses(self):
-        for rundir_status in reversed(active_rundirs):
-
-            (rundir, old_status, lims_status, lims_fields) = rundir_status
-
-            # Get up-to-date status for the run dir.
-            cur_status = rundir.update_status()
-
-            # If status is "Ready to Copy":
-            if rundir.is_finished():
-
-                log("Run", rundir.get_dir(), "has finished processing and is ready to copy.")
-
-                # If there aren't too many copies already going on, ready this dir and copy it.
-                if len(get_copying_rundirs()) < COPY_PROCESSES:
-
-                    # Make thumbnails subset tar.
-                    log(rundir.get_dir(), ": Making thumbnail subset tar")
-                    if rundir_utils.make_thumbnail_subset_tar(rundir,overwrite=True):
-                        log(rundir.get_dir(), ": Thumbnail subset tar created")
-                    else:
-                        log(rundir.get_dir(), ": Failed to make thumbnail subset tar")
-
-                    # Copy the directory.
-                    log("Starting copy of run %s" % (rundir.get_dir()))
-                    start_copy(rundir)
-
-                    # Get up-to-date status for the run dir following the copy initiation.
-                    cur_status = rundir.update_status()
-
-            # else if status is "Aborted":
-            elif cur_status == RunDir.STATUS_RUN_ABORTED:
-
-                # Move the run directory to Aborted subdirectory.
-                log("Moving aborted dir %s to %s subdirectory" % (rundir.get_dir(), SUBDIR_ABORTED))
-                os.renames(rundir.get_path(),os.path.join(rundir.get_root(),SUBDIR_ABORTED,rundir.get_dir()))
-
-                # No need to continue to LIMS status updates if the run was aborted.
-                continue
-
-            # else if status is "Copy Complete":
-            elif cur_status == RunDir.STATUS_COPY_COMPLETE:
-
-                # Start the archiving process for the run.
-                log("Starting archiving to cluster of run %s" % rundir.get_dir())
-                start_archive(rundir)
-
-                # Get up-to-date status for the run dir following the archive initiation.
-                cur_status = rundir.update_status()
-
-            # If the current status is the same as the previous status,
-            # move along, else store the new status.
-            if cur_status != old_status:
-
-                # Update our cache of the status.
-                rundir_status[1] = cur_status
-
-                # Log new status change.
-                log("Run %s changed from %s to %s" % (rundir.get_dir(),
-                                                      RunDir.STATUS_STRS[old_status],
-                                                      RunDir.STATUS_STRS[cur_status]))
-
-        #####
-        # PHASE 3.5: Update LIMS status of all active rundirs.
-        #####
-
-        lims_fields = lims_obj.lims_run_get_fields(rundir)
-
-        if lims_fields:
-            check_lims_msg = lims_obj.lims_run_check_rundir(rundir, lims_fields, check_local_run_dir=True)
-            hcs = False
-            if check_lims_msg: 
-              if check_lims_msg.startswith("RunDir software hcs_2_0"):
-                  hcs = True
-              log("Lims message regarding rundir " + rundir.get_dir() + " returned from lims_obj.lims_run_check_rundir() in autocopy_rundir.py: " + str(check_lims_msg))
-            if hcs or not check_lims_msg:
-                if lims_status != STATUS_LIMS_OK:
-                    log("Found LIMS run record for %s" % rundir.get_dir())
-                    lims_status = STATUS_LIMS_OK
-
-                # If this RunDir has already been copied, check if we need to set the Sequencer Done flag.
-                if rundir.is_copied():
-
-                    if lims_fields['sequencer_done'] != 'yes':
-                        # LIMS: change Sequencer Done flag to "True".
-                        seq_done_dict = {'sequencer_done': 'yes'}
-                        if lims_obj.lims_run_modify_params(rundir.get_dir(), seq_done_dict):
-                            log("LIMS: Set Sequencer Done flag of %s to True" % rundir.get_dir())
-                        else:
-                            log("LIMS: COULD NOT Set Sequencer Done flag of %s to True" % rundir.get_dir())
-
-                        # LIMS: change Flowcell Status to "Analyzing".
-                        if lims_obj.lims_flowcell_modify_status(name=rundir.get_flowcell(),status='analyzing'):
-                            log("LIMS: Set Flowcell Status of %s (%s) to 'analyzing'" % (rundir.get_dir(), rundir.get_flowcell()))
-                        else:
-                            log("LIMS: COULD NOT Set Flowcell Status of %s (%s) to 'analyzing'" % (rundir.get_dir(), rundir.get_flowcell()))
-
-            else:
-                lims_status = STATUS_LIMS_MISMATCH
-                log("LIMS run record for %s has a mismatch:" % rundir.get_dir())
-        else:
-            lims_status = STATUS_LIMS_MISSING
-            log("No LIMS run record for %s" % rundir.get_dir())
-
-
-        # Update the active rundir status with new LIMS information.
-        rundir_status[2] = lims_status
-        rundir_status[3] = lims_fields
-
-        if lims_status != STATUS_LIMS_MISSING:
-            # Look to see if Sequencer Failed status.
-            if lims_fields['seq_run_status'] == 'sequencing_failed':
-
-                #   Mark run as aborted.
-                log("LIMS: Run %s set to Sequencing Failed: marking as aborted..." % rundir.get_dir())
-                rundir.status = RunDir.STATUS_RUN_ABORTED
-                rundir.drop_status_file()
-
-                # Set all the status flags in the LIMS for this run.
-                all_flags_yes_dict = {'sequencer_done': 'yes', 'analysis_done': 'yes', 'dnanexus_done': 'yes',
-                                      'notification_done': 'yes', 'archiving_done': 'yes'}
-                if lims_obj.lims_run_modify_params(rundir.get_dir(), all_flags_yes_dict):
-                     log("LIMS: Set all flags of %s to True" % rundir.get_dir())
-                else:
-                     log("LIMS: COULD NOT Set all flags of %s to True" % rundir.get_dir())
-
-                #
-                # LIMS: change Flowcell Status to "Done".
-                #
-                if lims_obj.lims_flowcell_modify_status(name=rundir.get_flowcell(),status='done'):
-                    log("LIMS: Set Flowcell Status of %s (%s) to 'done'" % (rundir.get_dir(), rundir.get_flowcell()))
-                else:
-                    log("LIMS: COULD NOT Set Flowcell Status of %s (%s) to 'done'" % (rundir.get_dir(), rundir.get_flowcell()))
-
-
-            # Look if Archiving Done checked.
-            elif lims_fields['archiving_done'] == 'yes':
-
-                #   Remove from active runs.
-                log("%s has been archived: it can be deleted." % rundir.get_dir())
-                active_rundirs.remove(rundir_status)
-
-                #   Delete run directory.
-                #log("Deleting %s from active runs. " % rundir.get_dir())
-                # PUT DELETE DIR CODE HERE.
-                log("Moving archived run %s to subdirectory %s" % (rundir.get_dir(), SUBDIR_ARCHIVE))
-                os.renames(rundir.get_path(),os.path.join(rundir.get_root(),SUBDIR_ARCHIVE,rundir.get_dir()))
-
-
     def query_LIMS_for_missing_runs(self):
         pass
 
@@ -867,10 +514,10 @@ class AutocopyRundir:
         msg = email.mime.text.MIMEText(body)
         msg['Subject'] = subj
         msg['From'] = self.EMAIL_FROM
-        if isinstance(to,basestring):
-            msg['To'] = to
-        else:
+        if isinstance(to,list):
             msg['To'] = ','.join(to)
+        else:
+            msg['To'] = to
         if not self.NO_MAIL:
             self.smtp.sendmail(msg['From'], to, msg.as_string())
         if log:
@@ -885,6 +532,49 @@ class AutocopyRundir:
             print >> self.LOG_FILE, "[%s] %s" % (datetime.datetime.now().strftime("%Y %b %d %H:%M:%S"), line)
         self.LOG_FILE.flush()
 
+    def override_settings_with_config(self, config):
+        # Allows certain class variables to be overridden.
+
+        if config is None:
+            return
+
+        # Input validators
+        def validate_str(value):
+            if not (isinstance(value, str) or isinstance(value, unicode)):
+                raise ValidationError("Invalid value %s for config key %s. A string is required." %(value, key))
+        def validate_cmdline_safe_str(value):
+            pattern = '^[0-9a-zA-Z./_-]*$'
+            if not re.match(pattern, value):
+                raise ValidationError("Invalid value %s for config key %s. Must be a string matched by %s" %(value, key, pattern))
+        def validate_int(value):
+            if not isinstance(value, int):
+                raise ValidationError("Invalid value %s for config key %s. An integer is required." %(value, key))
+
+        override_allowed = {
+            'LOG_DIR_DEFAULT': validate_str,
+            'SUBDIR_COMPLETED': validate_str,
+            'SUBDIR_ABORTED': validate_str,
+            'LIMS_API_VERSION': validate_str,
+            'MAX_COPY_PROCESSES': validate_int,
+            'EMAIL_TO': validate_str,
+            'EMAIL_FROM': validate_str,
+            'COPY_DEST_HOST': validate_cmdline_safe_str,
+            'COPY_DEST_USER':validate_cmdline_safe_str,
+            'COPY_DEST_GROUP': validate_cmdline_safe_str,
+            'COPY_DEST_RUN_ROOT': validate_cmdline_safe_str,
+            'MIN_FREE_SPACE': validate_int,
+            'LOOP_DELAY_SECONDS': validate_int,
+        }
+        for key in config.keys():
+            value = config[key]
+            if key not in override_allowed.keys():
+                raise ValidationError("Config contains invalid key %s. Valid keys are %s" % 
+                                (key, override_allowed.keys()))
+
+            # Run validation function. Raises ValidationError
+            override_allowed[key](value)                
+            setattr(self, key, value)
+            
         """
     @classmethod
     def initialize_signals(cls):
@@ -1092,9 +782,18 @@ class AutocopyRundir:
         parser.add_option("-c", "--no_copy", dest="no_copy", action="store_true",
                           default=False,
                           help="don't copy run directories [default = allow copies]")
-        parser.add_option("-c", "--no_lims", dest="no_lims", action="store_true",
+        parser.add_option("-m", "--no_lims", dest="no_lims", action="store_true",
                           default=False,
                           help="don't query or write info to the LIMS [default = allow copies]")
+        parser.add_option("-e", "--no_email", dest="no_email", action="store_true",
+                          default=False,
+                          help="don't send email [default = send email]")
+        parser.add_option("-d", "--dry_run", dest="dry_run", action="store_true",
+                          default=False,
+                          help="same as --no_copy --no_lims --no_email [default = live run]")
+        parser.add_option("-g", "--config", dest="config_file", type="string",
+                          default=None,
+                          help='config file in JSON format to override default settings')
 
         (opts, args) = parser.parse_args()
         return (opts, args)
@@ -1102,7 +801,18 @@ class AutocopyRundir:
 
 if __name__=='__main__':
 
-    (opts, args) = AutocopyRundir.parse_args()
-    autocopy = AutocopyRundir(run_root_list=args, no_copy=opts.no_copy, log_file=opts.log_file)
-    autocopy.run()
+    (opts, args) = Autocopy.parse_args()
 
+    if opts.config_file:
+        with open(opts.config_file) as f:
+            config = json.load(f)
+    else:
+        config = None
+
+    if opts.dry_run:
+        (no_lims, no_copy, no_email) = (True, True, True)
+    else:
+        (no_lims, no_copy, no_email) = (opts.no_lims, opts.no_copy, opts.no_email)
+
+    autocopy = Autocopy(run_root_list=args, no_copy=no_copy, no_email=no_email, no_lims=no_lims, log_file=opts.log_file, config=config)
+    autocopy.run()
