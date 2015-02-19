@@ -520,6 +520,13 @@ class RunDir:
     def undrop_seg_status_file(self):
         self.undrop_status_file()
 
+    def reset_to_copy_not_started(self):
+        while self.get_status() >= self.STATUS_COPY_STARTED:
+            self.undrop_status_file()
+        self.copy_proc = None
+        self.copy_start_time = None
+        self.copy_end_time = None
+
     def is_finished(self):
 
         if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
