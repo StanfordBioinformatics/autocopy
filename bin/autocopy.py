@@ -13,7 +13,7 @@
 ###############################################################################
 
 #  Installation notes
-#    1. Keys must be configured to allow passwordless ssh to DEST_HOST
+#    1. Keys must be configured to allow passwordless ssh to DEST_HOST.
 #    2. Most tests use DEST_HOST='localhost', so on your personal machine you 
 #       need to allow SSH and add your own public key to authorized_hosts to run 
 #       tests.
@@ -41,7 +41,7 @@
 #   2. Don't crash if you can avoid it, and err on the side of start_copy rather than
 #      waiting for operator intervention. When LIMS is unavailable, a warning should 
 #      be logged and emailed, but autocopy should continue as normal.
-#   3. Emails should be explicit about the action required by the operator
+#   3. Emails should be explicit about the action required by the operator.
 #   4. Unittests can by run with test/test_autocopy.py. Keep them up to date 
 #      when changing autocopy. 
 #      a. For testing LIMS connections, tests use the scgpm_lims --local_only option, 
@@ -89,6 +89,7 @@ import smtplib
 import socket
 import subprocess
 import sys
+import traceback
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
 from bin.rundir import RunDir
@@ -151,85 +152,86 @@ class Autocopy:
         self.restore_stdout_stderr()
 
     def run(self):
-        self.send_email_start_msg()
-
-        try:
-            while True:
+        self.send_email_start_message()
+        while True:
+            try:
                 self._main()
-                time.sleep(self.LOOP_DELAY_SECONDS)
-
-        except Exception, e:
-            self.send_email_autocopy_crashed(e)
-            raise e
+            except Exception, e:
+                self.send_email_autocopy_exception(e)
+            time.sleep(self.LOOP_DELAY_SECONDS)
 
     def _main(self):
-        self.scan_run_roots_to_discover_rundirs()
-
+        self.update_rundirs_monitored()
         for rundir in self.rundirs_monitored:
-            rundir.update_status(lims_runinfo)
-            lims_runinfo = self.get_runinfo_from_lims(rundir)
-            if self.is_aborted(lims_runinfo):
-                self.process_aborted_dir(rundir)
-            if self.is_ready_for_copy(rundir):
-                self.process_ready_for_copy_dir(rundir)
-            if self.is_copying(rundir, lims_runinfo):
-                self.process_copying_dir(rundir)
-            if self.is_completed(rundir):
-                self.process_completed_dir(rundir)
+            self.process_rundir(rundir)
 
-            #TODO Daily email with status of all runs
+    def process_rundir(self, rundir):
+        lims_runinfo = self.get_runinfo_from_lims(rundir)
 
-    def process_ready_for_copy_dir(self, rundir, lims_runinfo):
+        if self.is_rundir_aborted(lims_runinfo):
+            self.process_aborted_rundir(rundir)
+
+        if rundir.is_copying():
+            self.process_copying_rundir(rundir)
+
+        # process_ready_for_copy_rundir goes after process_copying_rundir
+        # because when a copy process fails, process_copying_rundir resets
+        # it to a ready_for_copy state, and we can start the copy process
+        # in process_ready_for_copy_rundir right away.
+        if self.is_rundir_ready_for_copy(rundir):
+            self.process_ready_for_copy_rundir(rundir)
+
+        # TODO Daily email with status of all runs
+
+    def is_rundir_aborted(self, lims_runinfo):
+        return lims_runinfo.get_run_status() == lims_runinfo.SEQUENCING_RUN_STATUS_FAILED
+
+    def is_rundir_ready_for_copy(self, rundir):
+        return rundir.is_finished()
+
+    def process_ready_for_copy_rundir(self, rundir, lims_runinfo):
         self.start_copy(rundir)
-        rundir.set_status(RunDir.STATUS_COPY_STARTED)
+        # TODO fix LIMS status update
         lims_runinfo.set_run_status(lims_runinfo.DONE)
 
-    def process_copying_dir(self, rundir, lims_runinfo):
-        if not rundir.copy_proc:
-            # Indicates that a new RunDir was already in a Copy Started state
-            # Remove COPY_STARTED status file so copy can restart.
-            rundir.reset_to_copy_not_started()
-            self.log(rundir.get_dir(), "failed to copy and had no copy process attached")
-            self.log("Usually this is because Autocopy restarted while a copy was in progress")
-            self.log("Unsetting COPY_STARTED status to re-attempt copy.")
+    def process_copying_rundir(self, rundir, lims_runinfo):
+        # Check if the copy process finished successfully
+        retcode = rundir.copy_proc.poll()
+        if retcode == 0:
+            self.process_completed_rundir(rundir)
+        elif retcode == None:
+            # Still copying. Do nothing.
+            pass
         else:
-            # Check if the copy process finished successfully
-            retcode = rundir.copy_proc.poll()
-            if retcode == 0:
-                are_files_missing = self.are_files_missing(rundir)
-                lims_problems = self.check_rundir_against_lims(rundir, lims_runinfo)
-                disk_usage = rundir.get_disk_usage()
-                #TODO send one email per run, with info re flags above
-                rundir.set_status(RunDir.STATUS_COPY_COMPLETE)
-                rundir.copy_proc = None
-                rundir.copy_end_time = datetime.datetime.now()
-            elif retcode == None:
-                # Still copying. Do nothing.
-                pass
-            else:
-                # TODO email notice that copy failed.
-                # Revert status so copy can restart.
-                rundir.reset_to_copy_not_started()
+            # TODO email notice that copy failed.
+            # Revert status so copy can restart.
+            rundir.reset_to_copy_not_started()
 
-    def process_completed_dir(self, rundir):
+    def process_completed_rundir(self, rundir):
+        #TODO clean this up. It's a copy-paste dump
+        are_files_missing = self.are_files_missing(rundir)
+        lims_problems = self.check_rundir_against_lims(rundir, lims_runinfo)
+        disk_usage = rundir.get_disk_usage()
+        #TODO send one email per run, with info re flags above
+        # TODO move everything about start/end_time to rundir
+        rundir.unset_copy_proc_and_set_stop_time()
+
         log("%s copy is complete. Moving to %s. It can be deleted." % (
             rundir.get_dir(), os.path.join(rundir.get_root(), self.SUBDIR_COMPLETED)))
         os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_COMPLETED,rundir.get_dir()))
         self.rundirs_monitored.remove(rundir)
-        # TODO send email notification
 
-    def process_aborted_dir(self, rundir):
-        log("%s has been flagged as Sequencing Failed. Moving to %s. It can be deleted." % (
-            rundir.get_dir(), os.path.join(rundir.get_root(), self.SUBDIR_ABORTED)))
-        rundir.set_status(RunDir.STATUS_RUN_ABORTED)
-        os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_ABORTED,rundir.get_dir()))
-        self.rundirs_monitored.remove(rundir)
+    def process_aborted_rundir(self, rundir):
         # TODO send email
         # TODO
         # Set all the status flags in the LIMS for this run.                                                                                                                                        
         #        all_flags_yes_dict = {'sequencer_done': 'yes', 'analysis_done': 'yes', 'dnanexus_done': 'yes',
         # 'notification_done': 'yes', 'archiving_done': 'yes'}
         # flowcell = Done in LIMS
+        log("%s has been flagged as Sequencing Failed. Moving to %s. It can be deleted." % (
+            rundir.get_dir(), os.path.join(rundir.get_root(), self.SUBDIR_ABORTED)))
+        os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_ABORTED,rundir.get_dir()))
+        self.rundirs_monitored.remove(rundir)
 
     def initialize_hostname(self):
         hostname = socket.gethostname()
@@ -243,32 +245,40 @@ class Autocopy:
         if self.NO_EMAIL:
             return
 
-        # Try to get from env, then prompt user for input
-        smtp_server = os.getenv('AUTOCOPY_SMTP_SERVER')
-        smtp_port = os.getenv('AUTOCOPY_SMTP_PORT')
-        smtp_username = os.getenv('AUTOCOPY_SMTP_USERNAME')
-        smtp_token = os.getenv('AUTOCOPY_SMTP_TOKEN')
-
-        if not (smtp_server and smtp_port and smtp_username and smtp_token):
-            # get from user
-            print ("SMTP server settings were not set by env variables or commandline input")
-            print ("You can enter them manually now.")
-            if smtp_server is None:
-                smtp_server = raw_input("SMTP server URL: ")
-            if smtp_port is None:
-                smtp_port = raw_input("SMTP port: ")
-            if smtp_username is None:
-                smtp_username = raw_input("SMTP username: ")
-            if smtp_token is None:
-                smtp_token = raw_input("SMTP token: ")
-
-        if not (smtp_server and smtp_port and smtp_username and smtp_token):
-            raise ValidationError('SMTP server settings are required')
+        (smtp_server, smtp_port, smtp_username, smtp_token) = self.get_mail_server_settings()
 
         self.log("Connecting to mail server...")
         self.smtp = smtplib.SMTP(smtp_server, smtp_port, timeout=5)
         self.smtp.login(smtp_username, smtp_token)
         self.log("success.")
+
+    def get_mail_server_settings(self):
+        settings = self.get_mail_server_settings_from_env()
+        if not all(settings):
+            settings = self.get_mail_server_settings_from_user()
+        if not all(settings):
+            raise ValidationError('SMTP server settings are required')
+        return settings
+
+    def get_mail_server_settings_from_env(self):
+        smtp_server = os.getenv('AUTOCOPY_SMTP_SERVER')
+        smtp_port = os.getenv('AUTOCOPY_SMTP_PORT')
+        smtp_username = os.getenv('AUTOCOPY_SMTP_USERNAME')
+        smtp_token = os.getenv('AUTOCOPY_SMTP_TOKEN')
+        return (smtp_server, smtp_port, smtp_username, smtp_token)
+
+    def get_mail_server_settings_from_user(self, smtp_server, smtp_port, smtp_username, smtp_token):
+        print ("SMTP server settings were not set by env variables or commandline input")
+        print ("You can enter them manually now.")
+        if smtp_server is None:
+            smtp_server = raw_input("SMTP server URL: ")
+        if smtp_port is None:
+            smtp_port = raw_input("SMTP port: ")
+        if smtp_username is None:
+            smtp_username = raw_input("SMTP username: ")
+        if smtp_token is None:
+            smtp_token = raw_input("SMTP token: ")
+        return (smtp_server, smtp_port, smtp_username, smtp_token)
 
     def initialize_log_file(self, log_file):
         if log_file == "-":
@@ -338,30 +348,38 @@ class Autocopy:
             with open(readme, 'w') as f:
                 f.write('Runs in this directory are generally OK to delete.')
 
-    # sync rundirs_monitored with what's on disk
-    def scan_run_roots_to_discover_rundirs(self):
+    def update_rundirs_monitored(self):
+        # sync rundirs_monitored with what's on disk
+
         if not hasattr(self, 'rundirs_monitored'):
             # Initialize this instance var once after startup
             self.rundirs_monitored = []
 
         new_rundirs_monitored = []
         for run_root in self.RUN_ROOT_DIRS:
-            for dirname in os.listdir(run_root): # Directories on disk
-                # Include only directories that begin with a 6-digit start date
-                # Exclude special subdirs
-                if (os.path.isdir(os.path.join(run_root, dirname)) and
-                    re.match("\d{6}_", dirname) and
-                    dirname not in [self.SUBDIR_COMPLETED, self.SUBDIR_ABORTED]):
-                    new_rundirs_monitored.append(self.retrieve_or_create_rundir(run_root, dirname, remove=True))
+            new_rundirs_monitored.extend(self.scan_for_rundirs(run_root))
 
+        # We just removed any rundirs we found on disk from rundirs_monitored.
+        # Any dirs left are what we couldn't find on disk.
+        # Send email warning and then forget them.
         for missing_rundir in self.rundirs_monitored:
-            # These were being monitored but are no longer found on disk
-            #   Send notice before we overwrite the rundirs_monitored list
-            self.send_email_missing_rundir(missing_rundir, run_root)
+            self.send_email_missing_rundir(missing_rundir)
 
         self.rundirs_monitored = new_rundirs_monitored
 
-    def retrieve_or_create_rundir(self, run_root, dirname, remove=False):
+    def scan_for_rundirs(self, run_root):
+        rundirs_found_on_disk = []
+        for dirname in os.listdir(run_root): 
+            # Get directories, not files
+            if (os.path.isdir(os.path.join(run_root, dirname)) and
+                # Exclude rundir if it doesn't begin with a 6-digit start date
+                re.match("\d{6}_", dirname) and
+                # Exclude special subdirs
+                dirname not in [self.SUBDIR_COMPLETED, self.SUBDIR_ABORTED]):
+                rundirs_found_on_disk.append(self.get_or_create_rundir(run_root, dirname, remove=True))
+        return rundirs_found_on_disk
+
+    def get_or_create_rundir(self, run_root, dirname, remove=False):
         matching_rundir = self.get_rundir(run_root=run_root, dirname=dirname)
         if matching_rundir:
             if remove:
@@ -369,9 +387,6 @@ class Autocopy:
             return matching_rundir
         else:
             return RunDir(run_root, dirname)
-
-    def add_to_rundirs_monitored(self, run_root, dirname):
-        self.rundirs_monitored.append(RunDir(run_root, dirname))
 
     def are_files_missing(self, rundir):
         # Check that the run directory has all the right files.
@@ -405,12 +420,13 @@ class Autocopy:
         return problems_found
 
     def start_copy(self, rundir, rsync=True):
+        COPY_COMPLETE_FILE = "Autocopy_complete.txt"
         copy_cmd_list = [self.COPY_PROCESS_EXEC_COMMAND,
                          "--host", self.COPY_DEST_HOST,
                          "--user", self.COPY_DEST_USER,
                          "--group", self.COPY_DEST_GROUP,
                          "--dest_root", self.COPY_DEST_RUN_ROOT,
-                         "--status_file", RunDir.STATUS_FILES[RunDir.STATUS_COPY_COMPLETE],
+                         "--status_file", COPY_COMPLETE_FILE,
                          "--ssh_socket", self.SSH_SOCKET,
                      ]
         if rsync:
@@ -420,15 +436,14 @@ class Autocopy:
         copy_cmd_list.append(rundir.get_path())
 
         # Copy the directory.
-        rundir.copy_proc = subprocess.Popen(copy_cmd_list,
+        copy_proc = subprocess.Popen(copy_cmd_list,
                                             stdout=self.LOG_FILE, stderr=subprocess.STDOUT)
-        rundir.copy_start_time = datetime.datetime.now()
-        rundir.copy_end_time = None
+        rundir.set_copy_proc_and_start_time(copy_proc)
 
-    def send_email_autocopy_crashed(self, exception):
+    def send_email_autocopy_exception(self, exception):
         tb = traceback.format_exc(exception)
-        email_subj = "Autocopy crashed"
-        email_body = "The autocopy daemon crashed with Exception\n" + tb
+        email_subj = "Autocopy unknown exception"
+        email_body = "The autocopy daemon failed with Exception\n" + tb
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
     def send_email_invalid_rundir(self, rundir):
@@ -437,10 +452,10 @@ class Autocopy:
         email_body += "Location:\t%s:%s/%s\n\n" % (self.HOSTNAME, rundir.get_root(), rundir.get_dir())
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
-    def send_email_missing_rundir(self, missing_rundir, run_root):
-        email_subj = "Missing Run Dir %s" % missing_rundir.get_dir()
-        email_body = "MISSING RUN:\t%s\n" % missing_rundir.get_dir()
-        email_body += "Location:\t%s:%s/%s\n\n" % (self.HOSTNAME, run_root, missing_rundir.get_dir())
+    def send_email_missing_rundir(self, rundir):
+        email_subj = "Missing Run Dir %s" % rundir.get_dir()
+        email_body = "MISSING RUN:\t%s\n" % rundir.get_dir()
+        email_body += "Location:\t%s:%s/%s\n\n" % (self.HOSTNAME, rundir.get_root(), rundir.get_dir())
         email_body += "Autocopy was tracking this run, but can no longer find it on disk."
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
@@ -452,12 +467,13 @@ class Autocopy:
             email_body += "%s\n" % problem
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
-    def send_email_new_rundir(self, new_rundir, run_root):
+    def send_email_new_rundir(self, new_rundir):
         email_body  = "NEW RUN:\t%s\n" % new_rundir.get_dir()
-        email_body += "Location:\t%s:%s/%s\n" % (self.HOSTNAME, run_root, new_rundir.get_dir())
+        email_body += "Location:\t%s:%s/%s\n" % (self.HOSTNAME, new_rundir.get_root(), new_rundir.get_dir())
         if new_rundir.get_reads():
             email_body += "Read count:\t%d\n" % new_rundir.get_reads()
             email_body += "Cycles:\t\t%s\n" % " ".join(map(lambda d: str(d), new_rundir.get_cycle_list()))
+            # TODO get rid of this status
             if rundir.cached_lims_run_status == RunDir.STATUS_LIMS_MISMATCH:
                 email_body += "\n"
                 email_body += "NOTE: Run dir fields don't match LIMS record.\n"
@@ -481,14 +497,15 @@ class Autocopy:
         email_body += "Return code:\t%d\n" % retcode
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
-    def send_email_start_msg(self):
+    def send_email_start_message(self):
         email_subj = "Daemon Started"
         email_body = "The Autocopy Daemon was started.\n\n" + self.generate_run_status_table()
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
-    def send_email_rundir_copy_complete(self, rundir, is_rundir_valid):
+    def send_email_rundir_copy_complete(self, rundir, disk_usage, is_rundir_valid):
         # Calculate how large the run directory is.
-        disk_usage = rundir.get_disk_usage()
+        # TODO pass disk_usage into this function. don't run it twice.
+        # disk_usage = rundir.get_disk_usage()
         if disk_usage > self.ONEKILO:
             disk_usage /= self.ONEKILO
             disk_usage_units = "Tb"
@@ -503,14 +520,14 @@ class Autocopy:
         email_body += "Read count:\t\t%d\n" % rundir.get_reads()
         email_body += "Cycles:\t\t\t%s\n" % " ".join(map(lambda d: str(d), rundir.get_cycle_list()))
         email_body += "\n"
-        email_body += "Copy time:\t\t%s\n" % strftdelta(rundir.copy_end_time - rundir.copy_start_time)
+        email_body += "Copy time:\t\t%s\n" % str(rundir.copy_end_time - rundir.copy_start_time)
         email_body += "Disk usage:\t\t%.1f %s\n" % (disk_usage, disk_usage_units)
         email_subj_prefix = "Finished Run Dir "
         if not is_rundir_valid:
             email_body += "\n"
             email_body += "*** RUN HAS MISSING FILES ***"
             email_subj_prefix += "w/Missing Files "
-        self.email_message(self.EMAIL_TO, email_subj_prefix + rundir.get_dir(), email_body)
+        self.send_email(self.EMAIL_TO, email_subj_prefix + rundir.get_dir(), email_body)
 
     def send_email(self, to, subj, body, write_email_to_log=True):
         subj_prefix = "AUTOCOPY (%s): " % self.HOSTNAME
@@ -667,103 +684,101 @@ class Autocopy:
             signal.signal(signal.SIGTERM, sig_die)
 """
 
-    def generate_run_status_line(run_root):
-        if self.COPY_PROCESSES == self.MAX_COPY_PROCESSES:
-            ready_str = "Ready"
-            newcopying_str = ""
-        else:
-            ready_str = "READY"
-            newcopying_str = "(NEW COPYING TURNED OFF)"
-        self.log("%s:" % run_root,
-                 "%d Copying," % len(self.get_copying_rundirs(run_root)),
-                 "%d %s," % (len(self.get_ready_rundirs(run_root)), ready_str),
-                 "%d Running," % len(self.get_running_rundirs(run_root)),
-                 "%d Archiving," % len(self.get_archiving_rundirs(run_root)),
-                 "%d Completed," % len(self.get_completed_rundirs(run_root)),
-                 "%d Aborted," % len(self.get_aborted_rundirs(run_root)),
-                 "%d Failed" % len(self.get_failed_rundirs(run_root)),
-                 newcopying_str)
+#    def generate_run_status_line(run_root):
+#        if self.COPY_PROCESSES == self.MAX_COPY_PROCESSES:
+#            ready_str = "Ready"
+#            newcopying_str = ""
+#        else:
+#            ready_str = "READY"
+#            newcopying_str = "(NEW COPYING TURNED OFF)"
+#        self.log("%s:" % run_root,
+#                 "%d Copying," % len(self.get_copying_rundirs(run_root)),
+#                 "%d %s," % (len(self.get_ready_rundirs(run_root)), ready_str),
+#                 "%d Running," % len(self.get_running_rundirs(run_root)),
+#                 "%d Archiving," % len(self.get_archiving_rundirs(run_root)),
+#                 "%d Completed," % len(self.get_completed_rundirs(run_root)),
+#                 "%d Aborted," % len(self.get_aborted_rundirs(run_root)),
+#                 "%d Failed" % len(self.get_failed_rundirs(run_root)),
+#                 newcopying_str)
 
-    def generate_run_status_table(self):
-        run_status_table = ""
-        copying_rundirs = self.get_copying_rundirs()
-        if self.COPY_PROCESSES == self.MAX_COPY_PROCESSES:
-            run_status_table += "COPYING DIRECTORIES:\n"
-        else:
-            run_status_table += "COPYING DIRECTORIES: (New copying turned off)\n"
-        run_status_table += "-------------------\n"
-        if len(copying_rundirs):
-            for rundir in copying_rundirs:
-                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-        else:
-            run_status_table += "None\n"
+#    def generate_run_status_table(self):
+#        run_status_table = ""
+#        copying_rundirs = self.get_copying_rundirs()
+#        if self.COPY_PROCESSES == self.MAX_COPY_PROCESSES:
+#            run_status_table += "COPYING DIRECTORIES:\n"
+#        else:
+#            run_status_table += "COPYING DIRECTORIES: (New copying turned off)\n"
+#        run_status_table += "-------------------\n"
+#        if len(copying_rundirs):
+#            for rundir in copying_rundirs:
+#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
+#        else:
+#            run_status_table += "None\n"
 
-        ready_rundirs = self.get_ready_rundirs()
-        run_status_table += "\n"
-        run_status_table += "READY DIRECTORIES:\n"
-        run_status_table += "-----------------\n"
-        if len(ready_rundirs):
-            for rundir in ready_rundirs:
-                rundir.update_status()
-                run_status_table += "%s %s (%s)\n" % (rundir.get_dir().ljust(32), rundir.get_root(), rundir.get_status_string())
-        else:
-            run_status_table += "None\n"
+#        ready_rundirs = self.get_ready_rundirs()
+#        run_status_table += "\n"
+#        run_status_table += "READY DIRECTORIES:\n"
+#        run_status_table += "-----------------\n"
+#        if len(ready_rundirs):
+#            for rundir in ready_rundirs:
+#                run_status_table += "%s %s (%s)\n" % (rundir.get_dir().ljust(32), rundir.get_root(), rundir.get_status_string())
+#        else:
+#            run_status_table += "None\n"
 
-        running_rundirs = self.get_running_rundirs()
-        run_status_table += "\n"
-        run_status_table += "RUNNING DIRECTORIES:\n"
-        run_status_table += "-------------------\n"
-        if len(running_rundirs):
-            for rundir in running_rundirs:
-                rundir.update_status()
-                #run_status_table += rundir.get_dir().ljust(32) + rundir.get_root() + "(%s)" % rundir.get_status_string()
-                run_status_table += "%s %s (Cycle %s of %s)\n" % (rundir.get_dir().ljust(32), rundir.get_root(), rundir.get_scored_cycle(), rundir.get_total_cycles())
-        else:
-            run_status_table += "None\n"
+#        running_rundirs = self.get_running_rundirs()
+#        run_status_table += "\n"
+#        run_status_table += "RUNNING DIRECTORIES:\n"
+#        run_status_table += "-------------------\n"
+#        if len(running_rundirs):
+#            for rundir in running_rundirs:
+#                #run_status_table += rundir.get_dir().ljust(32) + rundir.get_root() + "(%s)" % rundir.get_status_string()
+#                run_status_table += "%s %s (Cycle %s of %s)\n" % (rundir.get_dir().ljust(32), rundir.get_root(), rundir.get_scored_cycle(), rundir.get_total_cycles())
+#        else:
+#            run_status_table += "None\n"
 
-        archiving_rundirs = self.get_archiving_rundirs()
-        run_status_table += "\n"
-        run_status_table += "ARCHIVING DIRECTORIES:\n"
-        run_status_table += "---------------------\n"
-        if len(archiving_rundirs):
-            for rundir in archiving_rundirs:
-                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-        else:
-            run_status_table += "None\n"
+#        archiving_rundirs = self.get_archiving_rundirs()
+#        run_status_table += "\n"
+#        run_status_table += "ARCHIVING DIRECTORIES:\n"
+#        run_status_table += "---------------------\n"
+#        if len(archiving_rundirs):
+#            for rundir in archiving_rundirs:
+#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
+#        else:
+#            run_status_table += "None\n"
 
-        completed_rundirs = self.get_completed_rundirs()
-        run_status_table += "\n"
-        run_status_table += "COMPLETED DIRECTORIES:\n"
-        run_status_table += "---------------------\n"
-        if len(completed_rundirs):
-            for rundir in completed_rundirs:
-                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-        else:
-            run_status_table += "None\n"
+#        completed_rundirs = self.get_completed_rundirs()
+#        run_status_table += "\n"
+#        run_status_table += "COMPLETED DIRECTORIES:\n"
+#        run_status_table += "---------------------\n"
+#        if len(completed_rundirs):
+#            for rundir in completed_rundirs:
+#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
+#        else:
+#            run_status_table += "None\n"
 
-        aborted_rundirs = self.get_aborted_rundirs()
-        run_status_table += "\n"
-        run_status_table += "ABORTED DIRECTORIES:\n"
-        run_status_table += "-------------------\n"
-        if len(aborted_rundirs):
-            for rundir in aborted_rundirs:
-                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-        else:
-            run_status_table += "None\n"
+#        aborted_rundirs = self.get_aborted_rundirs()
+#        run_status_table += "\n"
+#        run_status_table += "ABORTED DIRECTORIES:\n"
+#        run_status_table += "-------------------\n"
+#        if len(aborted_rundirs):
+#            for rundir in aborted_rundirs:
+#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
+#        else:
+#            run_status_table += "None\n"
 
-        failed_rundirs = self.get_failed_rundirs()
-        run_status_table += "\n"
-        run_status_table += "FAILED DIRECTORIES:\n"
-        run_status_table += "------------------\n"
-        if len(failed_rundirs):
-            for rundir in failed_rundirs:
-                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-        else:
-            run_status_table += "None\n"
+#        failed_rundirs = self.get_failed_rundirs()
+#        run_status_table += "\n"
+#        run_status_table += "FAILED DIRECTORIES:\n"
+#        run_status_table += "------------------\n"
+#        if len(failed_rundirs):
+#            for rundir in failed_rundirs:
+#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
+#        else:
+#            run_status_table += "None\n"
 
-        return run_status_table
+#        return run_status_table
 
-    def get_rundir(self, run_root=None, dirname=None, rundir_status=None):
+    def get_rundir(self, run_root=None, dirname=None):
         rundirs = self.get_rundirs(run_root=run_root, dirname=dirname)
         if len(rundirs) == 0:
             return None
@@ -772,47 +787,13 @@ class Autocopy:
                             % (run_root, dirname, rundirs))
         return rundirs[0]
 
-    def get_rundirs(self, run_root=None, dirname=None, rundir_status=None):
+    def get_rundirs(self, run_root=None, dirname=None):
         rundirs = self.rundirs_monitored
-        if rundir_status is not None:
-            rundirs = filter(lambda rundir: rundir.get_status() == rundir_status, rundirs)
         if dirname is not None:
             rundirs = filter(lambda rundir: rundir.get_dir() == dirname, rundirs)
         if run_root is not None:
             rundirs = filter(lambda rundir: rundir.get_root() == run_root, rundirs)
         return rundirs
-
-    def get_ready_for_copy_rundirs(self, run_root=None):
-        rundirs = self.get_rundirs(run_root=run_root)
-        rundirs = filter(lambda rundir: rundir.is_finished(), rundirs)
-        return rundirs
-
-    def is_ready_for_copy(self, rundir):
-        return rundir.is_finished()
-
-    def get_copying_rundirs(self, run_root=None):
-        return self.get_rundirs(rundir_status=RunDir.STATUS_COPY_STARTED, run_root=run_root)
-
-    def is_copying(self, rundir):
-        return rundir.get_status() == RunDir.STATUS_COPY_STARTED
-
-    def get_running_rundirs(self, run_root=None):
-        rundirs = self.get_rundirs(run_root=run_root)
-        rundirs =  filter((lambda rundir: rundir.status < RunDir.STATUS_COPY_STARTED and
-                           not rundir.is_finished() ), rundirs)
-        return rundirs
-
-    def get_completed_rundirs(self, run_root=None):
-        return self.get_rundirs(rundir_status=RunDir.STATUS_COPY_COMPLETE, run_root=run_root)
-
-    def is_completed(self, rundir):
-        return rundir.get_status() == RunDir.STATUS_COPY_COMPLETE
-
-    def get_aborted_rundirs(self, run_root=None):
-        return self.get_rundirs(rundir_status=RunDir.STATUS_RUN_ABORTED, run_root=run_root)
-
-    def is_aborted(self, lims_runinfo):
-        return lims_runinfo.get_run_status() == lims_runinfo.SEQUENCING_RUN_STATUS_FAILED
 
     @classmethod
     def parse_args(cls):

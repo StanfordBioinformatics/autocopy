@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import datetime
 import glob
 import os
 import os.path
@@ -43,13 +44,6 @@ class RunDir:
         "Base Calling Complete (Read 2)",
         "Base Calling Complete (Read 3)",
         "Base Calling Complete (Read 4)",
-        "Copy Started",
-        "Copy Complete",
-        "Copy Failed",
-        "Archive Started",
-        "Archive Complete",
-        "Archive Failed",
-        "Run Aborted"
         ]
 
     # Status constants
@@ -65,14 +59,7 @@ class RunDir:
      STATUS_BASECALLING_COMPLETE_READ1,
      STATUS_BASECALLING_COMPLETE_READ2,
      STATUS_BASECALLING_COMPLETE_READ3,
-     STATUS_BASECALLING_COMPLETE_READ4,
-     STATUS_COPY_STARTED,
-     STATUS_COPY_COMPLETE,
-     STATUS_COPY_FAILED,
-     STATUS_ARCHIVE_STARTED,
-     STATUS_ARCHIVE_COMPLETE,
-     STATUS_ARCHIVE_FAILED,
-     STATUS_RUN_ABORTED) = range(STATUS_MAX_INDEX)
+     STATUS_BASECALLING_COMPLETE_READ4) = range(STATUS_MAX_INDEX)
 
     # Status files
     STATUS_FILES= [
@@ -88,13 +75,6 @@ class RunDir:
         "Basecalling_Netcopy_complete_READ2.txt",
         "Basecalling_Netcopy_complete_READ3.txt",
         "Basecalling_Netcopy_complete_READ4.txt",
-        "Autocopy_started.txt",
-        "Autocopy_complete.txt",
-        "Autocopy_failed.txt",
-        "Archive_started.txt",
-        "Archive_complete.txt",
-        "Archive_failed.txt",
-        "Run_aborted.txt"
     ]
 
     #
@@ -124,27 +104,6 @@ class RunDir:
      ANALYSIS_STATUS_IDX_COMP_STRING,
      ANALYSIS_STATUS_IDX_FILENAME) = range(3)
     
-#    # Analysis Status strings
-#    ANALYSIS_STATUS_STRS= [
-#        None,
-#        "Analysis Started",
-#
-#        "Pre-run Started",
-#        "Pre-run Complete"
-#
-#        "Bcl LANE Started",
-#        "Bcl LANE Complete",
-#        "Mapping LANE Started",
-#        "Mapping LANE Complete",
-#        "Publish LANE Started",
-#        "Publish LANE Complete",
-#
-#        "Post-run Started",
-#        "Post-run Complete",
-#
-#        "Analysis Complete"
-#    ]
-
     # Analysis Status constants
     ANALYSIS_STATUS_MAX_INDEX = len(ANALYSIS_STATUS_ARRAY)
     (ANALYSIS_STATUS_NONE,
@@ -204,26 +163,14 @@ class RunDir:
         self.control_software_version = None
         self.seq_kit_version = None
 
-        self.status = RunDir.STATUS_INITIALIZED
-        self.update_status()
-
         self.copy_proc = None
         self.copy_start_time = None
         self.copy_end_time = None
-
-        self.archive_proc = None
-        self.archive_start_time = None
-        self.archive_end_time = None
-
-        self.disk_usage = None
-
-        self.validated = None
 
         self.start_date = None
         self.machine = None
         self.number = None
         self.flowcell = None
-
         
     def str(self):
         s = ""
@@ -479,78 +426,70 @@ class RunDir:
     # SEQUENCING STATUS METHODS
     #
     def get_status(self):
-        return self.status
-    def get_seq_status(self):
-        return self.get_status()
-    def get_status_string(self):
-        return RunDir.STATUS_STRS[self.status]
-    def get_seq_status_string(self):
-        return self.get_status_string()
-
-    def set_status(self, status):
-        self.status = status
-        self.drop_status_file()
-
-    def update_status(self):
         # Find the highest numbered status (latest in workflow) that
         #  is represented by a file in the run dir.
         for status in range(RunDir.STATUS_MAX_INDEX - 1, RunDir.STATUS_INITIALIZED, -1):
             if os.path.exists(os.path.join(self.get_path(), RunDir.STATUS_FILES[status])):
-                self.status = status
                 break
         else:
-            self.status = RunDir.STATUS_INITIALIZED
+            status = RunDir.STATUS_INITIALIZED
+        return status
 
-        return self.status
-    def update_seq_status(self):
-        return self.update_status()
+    def get_seq_status(self):
+        return self.get_status()
 
-    def drop_status_file(self):
-        if RunDir.STATUS_FILES[self.status] is not None:
-            fp = open(os.path.join(self.get_path(), RunDir.STATUS_FILES[self.status]),"w")
-            fp.close()
-    def drop_seq_status_file(self):
-        self.drop_status_file()
+    def get_status_string(self):
+        return RunDir.STATUS_STRS[self.get_status()]
 
-    def undrop_status_file(self):
-        if (RunDir.STATUS_FILES[self.status] is not None and
-            self.status > RunDir.STATUS_BASECALLING_COMPLETE_READ4):
-            status_path = os.path.join(self.get_path(), RunDir.STATUS_FILES[self.status])
-            os.remove(status_path)
-    def undrop_seg_status_file(self):
-        self.undrop_status_file()
+    def get_seq_status_string(self):
+        return self.get_status_string()
 
     def reset_to_copy_not_started(self):
-        while self.get_status() >= self.STATUS_COPY_STARTED:
-            self.undrop_status_file()
         self.copy_proc = None
         self.copy_start_time = None
         self.copy_end_time = None
 
+    def is_copying(self):
+        if self.copy_proc:
+            return True
+        else:
+            return False
+
+    def set_copy_proc_and_start_time(self, copy_proc):
+        self.copy_proc = copy_proc
+        self.copy_start_time = datetime.datetime.now()
+        self.copy_end_time = None
+
+    def unset_copy_proc_and_set_stop_time(self):
+        self.copy_proc = None
+        self.copy_end_time = datetime.datetime.now()
+
     def is_finished(self):
+
+        status = self.get_status()
 
         if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
             if self.get_reads() == 1:
-                return self.status == RunDir.STATUS_BASECALLING_COMPLETE_SINGLEREAD
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_SINGLEREAD
             else:
-                return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
             
         elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ:
             sw_version = self.get_control_software_version(integer=True)
             if sw_version == 1137:  # "1.1.37"
                 if self.get_reads() == 1:
-                    return self.status == RunDir.STATUS_BASECALLING_COMPLETE_SINGLEREAD
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_SINGLEREAD
                 else:
-                    return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
             elif sw_version >= 1308: # "1.3.8", "1.4.5", "1.4.8", "1.5.15"
                 if self.get_reads() == 1:
-                    return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ1
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ1
                 elif self.get_reads() == 2:
-                    return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
                 elif self.get_reads() == 3:
-                    return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
                 elif self.get_reads() == 4:
-                    return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
                 else:
                     print >> sys.stderr, "RunDir.is_finished(): %s: Unexpected number of reads: %d" % (self.get_dir(), self.get_reads())
                     return False
@@ -560,13 +499,13 @@ class RunDir:
 
         elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ:
             if self.get_reads() == 1:
-                return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ1
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ1
             elif self.get_reads() == 2:
-                return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
             elif self.get_reads() == 3:
-                return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
             elif self.get_reads() == 4:
-                return self.status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
             else:
                 print >> sys.stderr, "RunDir.is_finished(): %s: Unexpected number of reads: %d" % (self.get_dir(), self.get_reads())
                 return False
@@ -576,12 +515,6 @@ class RunDir:
             return False
     def is_seq_finished(self):
         return self.is_finished()
-
-    def is_copied(self):
-        return (self.status == RunDir.STATUS_COPY_COMPLETE or
-                self.status == RunDir.STATUS_ARCHIVE_STARTED or
-                self.status == RunDir.STATUS_ARCHIVE_COMPLETE or
-                self.status == RunDir.STATUS_ARCHIVE_FAILED)
 
     #
     # ANALYSIS STATUS METHODS
@@ -667,13 +600,6 @@ class RunDir:
             if os.path.exists(status_path):
                 os.remove(status_path)
 
-
-    def is_valid(self):
-        has_runinfo = os.path.exists(os.path.join(self.get_path(),"RunInfo.xml"))
-        has_datadir = os.path.exists(os.path.join(self.get_path(),"Data"))
-
-        return has_runinfo and has_datadir
-
     def get_disk_usage(self):
         #
         # Run 'du' on the run directory.
@@ -688,8 +614,8 @@ class RunDir:
         elif platfm == "Darwin":
             du_cmd_list.append("-g")
         else:
-            print >> sys.stderr, "get_disk_usage(): Unknown platform %s" % (platfm)
-            self.disk_usage = None
+            print >> sys.stderr, "get_disk_usage(): Unknown OS platform %s" % (platfm)
+            disk_usage = None
             return self.disk_usage
 
         # Add the run directory path to the command.
@@ -701,12 +627,7 @@ class RunDir:
 
         # Parse the output.
         (disk_usage, dir) = du_stdout.split()
-        self.disk_usage = int(disk_usage)
-
-        return self.disk_usage
-
-    def get_validated(self):
-        return self.validated
+        return int(disk_usage)
 
     ###
     # Other methods

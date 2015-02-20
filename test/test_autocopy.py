@@ -41,16 +41,11 @@ class TestAutocopy(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp_dir)
 
+    # --------------- INITIALIZATION --------------
+
     def testOptionsLogfile(self):
         a = Autocopy(log_file=self.tmp_file.name, run_root_dirs=[self.tmp_dir], no_email=True, test_mode_lims=True, config=self.config)
         self.assertEqual(a.LOG_FILE.name, self.tmp_file.name)
-
-#    Disabled because this test leaves a file in /var/log
-#    def testOptionsLogfileDefaultDir(self):
-#        # Verify that LOG_FILE defaults to the default log dir
-#        LOG_DIR_DEFAULT = "/usr/local/log"
-#        a = Autocopy(run_root_dirs=None)
-#        self.assertEqual(os.path.dirname(a.LOG_FILE.name), LOG_DIR_DEFAULT)
 
     def testOptionsCopyOnly(self):
         a = Autocopy(no_copy=True, log_file=self.tmp_file.name, run_root_dirs=[self.tmp_dir], no_email=True, test_mode_lims=True, config=self.config)
@@ -74,6 +69,13 @@ class TestAutocopy(unittest.TestCase):
         self.assertEqual(os.path.realpath(self.tmp_dir), os.path.realpath(a.RUN_ROOT_DIRS[0]))
         os.chdir(cwd)
     
+#    Disabled because this test leaves a file in /var/log
+#    def testOptionsLogfileDefaultDir(self):
+#        # Verify that LOG_FILE defaults to the default log dir
+#        LOG_DIR_DEFAULT = "/usr/local/log"
+#        a = Autocopy(run_root_dirs=None)
+#        self.assertEqual(os.path.dirname(a.LOG_FILE.name), LOG_DIR_DEFAULT)
+
     def testCreateRundir(self):
         run_root = os.path.join(self.tmp_dir, 'run1')
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
@@ -84,13 +86,6 @@ class TestAutocopy(unittest.TestCase):
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
         self.assertTrue(os.path.exists(os.path.join(run_root, 'CopyCompleted')))
         self.assertTrue(os.path.exists(os.path.join(run_root, 'RunAborted')))
-
-    def testLog(self):
-        a = Autocopy(run_root_dirs=[self.tmp_dir], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-        a.log('test', 'log', 'to', 'file')
-        with open(a.LOG_FILE.name, 'r') as f:
-            text = f.read()
-            self.assertTrue(re.search('test log to file', text))
 
     def testConfig(self):
         max_copy_processes = 99
@@ -114,6 +109,15 @@ class TestAutocopy(unittest.TestCase):
         with self.assertRaises(ValidationError):
             a = Autocopy(run_root_dirs=[self.tmp_dir], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=config)
 
+    # --------------- SERVICES -------------------
+
+    def testLog(self):
+        a = Autocopy(run_root_dirs=[self.tmp_dir], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
+        a.log('test', 'log', 'to', 'file')
+        with open(a.LOG_FILE.name, 'r') as f:
+            text = f.read()
+            self.assertTrue(re.search('test log to file', text))
+
     def testLIMSConnection(self):
         a = Autocopy(run_root_dirs=[self.tmp_dir], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
         a.LIMS.testconnection()
@@ -121,50 +125,95 @@ class TestAutocopy(unittest.TestCase):
     def testSMTPConnection(self):
         a = Autocopy(run_root_dirs=[self.tmp_dir], log_file=self.tmp_file.name, no_email=False, test_mode_lims=True, config=self.config)
 
-#    # Commented out because I pulled the Autocopy.isValid method. Confusing alongside rundir_utils.validate, and didn't seem necessary.
-#    def testIsRundirValid(self):
-#        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-#        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True)
-#        a.scan_run_roots_to_discover_rundirs()
-#        rundirs = a.rundirs_monitored
-#        isValid = a.is_rundir_valid(rundirs[0])
-#        self.assertFalse(isValid)
+    # ------------------- EMAILS -------------------------
 
-    def testIsAborted(self):
+    def testEmails(self):
+        runroot = self.tmp_dir
+        rundirname = '123456_run_name'
+        os.mkdir(os.path.join(runroot, rundirname))
+        rundir = RunDir(runroot, rundirname)
+        rundir.set_copy_proc_and_start_time(1)
+        rundir.unset_copy_proc_and_set_stop_time()
+
+        a = Autocopy(run_root_dirs=[runroot], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
+
+        a.send_email_autocopy_exception(Exception('test exception'))
+        a.send_email_invalid_rundir(rundir)
+        a.send_email_missing_rundir(rundir)
+        problems_found = ['problem98', 'problem99']
+        a.send_email_check_rundir_against_lims(rundir, problems_found)
+        a.send_email_new_rundir(rundir)
+        retcode = 1
+        a.send_email_copy_failed(rundir, retcode)
+        # TODO
+        # a.send_email_start_message()
+        disk_usage = 1024
+        is_valid = False
+        a.send_email_rundir_copy_complete(rundir, disk_usage, is_valid)
+
+    # --------------- GENERAL UNIT TESTS -----------------
+
+    def testIsRundirAborted(self):
         run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-        a.scan_run_roots_to_discover_rundirs()
+        a.update_rundirs_monitored()
         rundir = a.get_rundir(dirname='141117_MONK_0387_AC4JCDACXX')
         lims_runinfo = a.get_runinfo_from_lims(rundir)
-        self.assertFalse(a.is_aborted(lims_runinfo))
+        self.assertFalse(a.is_rundir_aborted(lims_runinfo))
 
-#    def testProcessAbortedDir(self):
-#        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-#        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-#        a.scan_run_roots_to_discover_rundirs()
-#        rundir = a.get_rundir(dirname='141117_MONK_0387_AC4JCDACXX')
-#        rundir.set_status()
-
-    def testProcessReadyForCopyDir(self):
-        pass
-
-    def testProcessCopyingDir(self):
-        pass
-
-    def testProcessCompletedDir(self):
-        pass
-
-    def testScanRunRootsAddUnkonwn(self):
+    def testIsRundirReadyForCopy(self):
         run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-        a.scan_run_roots_to_discover_rundirs()
+        a.update_rundirs_monitored()
+        rundir = a.get_rundir(dirname='141117_MONK_0387_AC4JCDACXX')
+        self.assertTrue(a.is_rundir_ready_for_copy(rundir))
+
+    def testProcessAbortedRundir(self):
+        pass
+
+    def testProcessReadyForCopyRundir(self):
+        pass
+
+#    def testProcessReadyForCopyDirs(self):
+#        source_run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
+#        source_rundir = os.path.join(source_run_root, run_name)
+
+#        dest_run_root = os.path.join(self.tmp_dir, 'dest')
+#        dest_host = 'localhost'
+#        dest_group = grp.getgrgid(pwd.getpwuid(os.getuid()).pw_gid).gr_name
+#        dest_user = pwd.getpwuid(os.getuid()).pw_name
+#        os.makedirs(dest_run_root)
+
+        # Initialize autocopy and create the source root
+#        a = Autocopy(log_file=self.tmp_file.name, run_root_dirs=[source_run_root], no_email=True, test_mode_lims=True)
+
+#        a.cleanup_ssh_socket()
+#        a.COPY_DEST_HOST  = dest_host
+#        a.COPY_DEST_USER  = dest_user
+#        a.COPY_DEST_GROUP = dest_group
+#        a.COPY_DEST_RUN_ROOT = dest_run_root
+#        a.initialize_ssh_socket()
+
+#        a.update_rundirs_monitored() # To initialize rundirs_monitored list
+
+#        rundirs = self.get_ready_for_copy_dirs()
+#        self.assertEqual(len(rundirs, 2))
+
+
+    def testProcessCopyingRundir(self):
+        pass
+
+    def testUpdateRundirsMonitored(self):
+        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
+        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
+        a.update_rundirs_monitored()
         n_valid_runs = 2 # valid rundirs in root directory
         self.assertEqual(len(a.rundirs_monitored), n_valid_runs)
 
-    def testScanRundirForMissingFiles(self):
+    def testAreFilesMissing(self):
         run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-        a.scan_run_roots_to_discover_rundirs()
+        a.update_rundirs_monitored()
         rundir = a.get_rundir(dirname='141117_MONK_0387_AC4JCDACXX')
         areFilesMissing = True
         self.assertEqual(a.are_files_missing(rundir), areFilesMissing)
@@ -172,7 +221,7 @@ class TestAutocopy(unittest.TestCase):
     def testCheckRundirAgainstLims(self):
         run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-        a.scan_run_roots_to_discover_rundirs()
+        a.update_rundirs_monitored()
         rundir = a.get_rundir(dirname='141117_MONK_0387_AC4JCDACXX')
         runinfo = a.get_runinfo_from_lims(rundir)
         problems_found = a.check_rundir_against_lims(rundir, runinfo)
@@ -207,7 +256,7 @@ class TestAutocopy(unittest.TestCase):
 
         # Initialize autocopy and create the source root
         a = Autocopy(log_file=self.tmp_file.name, run_root_dirs=[source_run_root], no_email=True, test_mode_lims=True, config=config)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
+        a.update_rundirs_monitored() # To initialize rundirs_monitored list
         rundir = a.get_rundir(dirname=run_name)
         a.start_copy(rundir)
         retcode = rundir.copy_proc.wait()
@@ -217,127 +266,7 @@ class TestAutocopy(unittest.TestCase):
             text = f.read()
         self.assertTrue(re.search("Hello", text))
 
-#    def testProcessReadyForCopyDirs(self):
-#        source_run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-#        source_rundir = os.path.join(source_run_root, run_name)
-
-#        dest_run_root = os.path.join(self.tmp_dir, 'dest')
-#        dest_host = 'localhost'
-#        dest_group = grp.getgrgid(pwd.getpwuid(os.getuid()).pw_gid).gr_name
-#        dest_user = pwd.getpwuid(os.getuid()).pw_name
-#        os.makedirs(dest_run_root)
-
-        # Initialize autocopy and create the source root
-#        a = Autocopy(log_file=self.tmp_file.name, run_root_dirs=[source_run_root], no_email=True, test_mode_lims=True)
-
-#        a.cleanup_ssh_socket()
-#        a.COPY_DEST_HOST  = dest_host
-#        a.COPY_DEST_USER  = dest_user
-#        a.COPY_DEST_GROUP = dest_group
-#        a.COPY_DEST_RUN_ROOT = dest_run_root
-#        a.initialize_ssh_socket()
-
-#        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-
-#        rundirs = self.get_ready_for_copy_dirs()
-#        self.assertEqual(len(rundirs, 2))
-
-    def testGetCopyingRundirs(self):
-        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-        n_valid_runs = 2 #valid rundirs in root directory
-        self.assertEqual(len(a.rundirs_monitored), n_valid_runs)
-
-        # Switch one run to a copying status
-        a.rundirs_monitored[0].status = RunDir.STATUS_COPY_STARTED
-        n_copying_runs = 1
-        self.assertEqual(len(a.get_copying_rundirs()), n_copying_runs)
-
-    def testGetXXRundirs(self):
-        # No validation, just exercising the code
-        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-        n_valid_runs = 2 #valid rundirs in root directory
-        self.assertEqual(len(a.rundirs_monitored), n_valid_runs)
-
-        a.get_rundirs()
-        a.get_ready_for_copy_rundirs()
-        a.get_copying_rundirs()
-        a.get_running_rundirs()
-        a.get_completed_rundirs()
-        a.get_aborted_rundirs()
-
-    """
-    def testGenerateRundirsTable(self):
-        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-        run_status_table = a.generate_run_status_table()
-        # Verify snippets of expected text
-        self.assertTrue(re.search('RUNNING DIRECTORIES', run_status_table))
-        run1 = '141117_MONK_0387_AC4JCDACXX'
-        run2 = '141126_PINKERTON_0343_BC4J1PACXX'
-        self.assertTrue(re.search(run1, run_status_table))
-        
-    def testExamineCopyingDirsRetCodeFailed(self):
-        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-        # Assign a fake copyproc object to imitate a copy that is completed, in progress, failed because dest exists, or failed for unkown
-        failedCopyProc = CopyProcHelper(7)
-        destAlreadyExistsCopyProc = CopyProcHelper(5)
-        successCopyProc = CopyProcHelper(0)
-        runningCopyProc = CopyProcHelper(None)
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.STATUS_COPY_STARTED
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.copyproc = failedCopyProc
-        a.examine_copying_dirs()
-        #TODO
-
-    def testExamineCopyingDirsRetCodeAlreadyExists(self):
-        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-        # Assign a fake copyproc object to imitate a copy that is completed, in progress, failed because dest exists, or failed for unkown
-        failedCopyProc = CopyProcHelper(7)
-        destAlreadyExistsCopyProc = CopyProcHelper(5)
-        successCopyProc = CopyProcHelper(0)
-        runningCopyProc = CopyProcHelper(None)
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.STATUS_COPY_STARTED
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.copyproc = destAlreadyExistsCopyProc
-        a.examine_copying_dirs()
-        #TODO
-
-    def testExamineCopyingDirsRetCodeSuccess(self):
-        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-        # Assign a fake copyproc object to imitate a copy that is completed, in progress, failed because dest exists, or failed for unkown
-        failedCopyProc = CopyProcHelper(7)
-        destAlreadyExistsCopyProc = CopyProcHelper(5)
-        successCopyProc = CopyProcHelper(0)
-        runningCopyProc = CopyProcHelper(None)
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.STATUS_COPY_STARTED
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.copyproc = successCopyProc
-        a.examine_copying_dirs()
-        #TODO
-
-    def testExamineCopyingDirsRetCodeRunning(self):
-        run_root = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0'))
-        a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True)
-        a.scan_run_roots_to_discover_rundirs() # To initialize rundirs_monitored list
-        # Assign a fake copyproc object to imitate a copy that is completed, in progress, failed because dest exists, or failed for unkown
-        failedCopyProc = CopyProcHelper(7)
-        destAlreadyExistsCopyProc = CopyProcHelper(5)
-        successCopyProc = CopyProcHelper(0)
-        runningCopyProc = CopyProcHelper(None)
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.STATUS_COPY_STARTED
-        a.rundirs_monitored[0].cached_rundir_status = RunDir.copyproc = runningCopyProc
-        a.examine_copying_dirs()
-        #TODO
-"""
-        
+    # ------------ EMAIL TESTS --------------
 
 if __name__=='__main__':
     unittest.main()
