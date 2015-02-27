@@ -86,8 +86,8 @@ class TestAutocopy(unittest.TestCase):
     def testCreateSubdirs(self):
         run_root = os.path.join(self.tmp_dir, 'run1')
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config, errors_to_terminal=DEBUG)
-        self.assertTrue(os.path.exists(os.path.join(run_root, 'CopyCompleted')))
-        self.assertTrue(os.path.exists(os.path.join(run_root, 'RunAborted')))
+        self.assertTrue(os.path.exists(os.path.join(run_root, 'Runs_Completed')))
+        self.assertTrue(os.path.exists(os.path.join(run_root, 'Runs_Aborted')))
 
     def testConfig(self):
         max_copy_processes = 99
@@ -145,6 +145,7 @@ class TestAutocopy(unittest.TestCase):
 
         a.send_email_autocopy_exception(Exception('test exception'))
         a.send_email_autocopy_started()
+        a.send_email_autocopy_stopped()
         a.send_email_rundir_aborted(rundir, '/aborted/runs/directory')
         a.send_email_rundir_copy_failed(rundir, dummy_retcode)
         a.send_email_rundir_copy_complete(rundir, are_files_missing, dummy_problems_found, dummy_disk_usage)
