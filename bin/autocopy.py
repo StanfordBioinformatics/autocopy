@@ -160,12 +160,12 @@ class Autocopy:
     def cleanup(self):
         try:
             self.cleanup_ssh_socket()
-        except:
-            pass
+        except Exception as e:
+            print e
         try:
             self.restore_stdout_stderr()
-        except:
-            pass
+        except Exception as e:
+            print e
 
     def run(self):
         self.send_email_autocopy_started()
@@ -365,7 +365,7 @@ class Autocopy:
             self.SSH_SOCKET = None
             return
 
-        self.SSH_SOCKET = "/tmp/autocopy_copy_%d.ssh" % os.getpid()
+        self.SSH_SOCKET = "/tmp/autocopy_copy_%d_%s.ssh" % (os.getpid(), time.time())
         ssh_cmd_list = ["ssh", "-o", "ConnectTimeout=10", "-l", self.COPY_DEST_USER,
                         "-S", self.SSH_SOCKET, "-M", "-f", "-N",
                         self.COPY_DEST_HOST]
@@ -405,7 +405,7 @@ class Autocopy:
             return
         retcode = subprocess.call(["ssh", "-O", "exit", "-S", self.SSH_SOCKET, self.COPY_DEST_HOST], stdout=self.LOG_FILE, stderr=self.LOG_FILE)
         if retcode:
-            print >> sys.stderr, os.path.basename(__file__), ": cannot close ssh socket into", self.COPY_DEST_HOST, "( retcode =", retcode, ")"
+            raise Exception("%s: cannot close ssh socket into %s ( retcode = %s )" % (os.path.basename(__file__), self.COPY_DEST_HOST, retcode))
 
     def leave_ok_to_delete_readme(self, directory):
         readme = os.path.join(directory, 'README.txt')
@@ -518,6 +518,11 @@ class Autocopy:
         email_subj = "Daemon Started"
         email_body = "The Autocopy Daemon was started.\n\n"
         email_body += "You should receive a message with a summary of active run directories soon."
+        self.send_email(self.EMAIL_TO, email_subj, email_body)
+
+    def send_email_autocopy_stopped(self):
+        email_subj = "Daemon Stopped"
+        email_body = "The Autocopy Daemon received a kill signal and is shutting down.\n\n"
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
     def send_email_rundir_aborted(self, rundir, dest_path):
@@ -706,7 +711,7 @@ class Autocopy:
         signal.signal(signal.SIGUSR1, self.receive_sig_USR1)
 
     def receive_sig_die(self, signum, frame):
-        self.log("Killed by signal %d" % signum)
+        self.send_email_autocopy_stopped()
         self.cleanup()
         sys.exit(0)
 
