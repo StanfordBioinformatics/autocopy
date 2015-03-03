@@ -188,7 +188,13 @@ class Autocopy:
         lims_runinfo = self.get_runinfo_from_lims(rundir)
 
         if self.is_rundir_aborted(lims_runinfo):
-            self.process_aborted_rundir(rundir, lims_runinfo)
+            if rundir.is_copying():
+                # Ignore "sequencing failed" flag after copy started.
+                # No mechanism to clean up on the other end of the copy,
+                # so just go with it.
+                pass
+            else:
+                self.process_aborted_rundir(rundir, lims_runinfo)
 
         if rundir.is_copying():
             self.process_copying_rundir(rundir, lims_runinfo)
