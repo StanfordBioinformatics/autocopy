@@ -96,7 +96,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
 from bin.rundir import RunDir
 from bin import rundir_utils
 from scgpm_lims import Connection
-from scgpm_lims import RunInfo
+from scgpm_lims import RunInfo, SolexaRun, SolexaFlowCell
 
 class ValidationError(Exception):
     pass
@@ -110,8 +110,8 @@ class Autocopy:
 
     LIMS_API_VERSION = 'v1'
 
-    #TODO apply this cap
     MAX_COPY_PROCESSES = 2 # Cap the number of copy procs
+    copy_processes_counter = 0
 
     EMAIL_TO = None
     EMAIL_FROM = None
@@ -128,10 +128,9 @@ class Autocopy:
     ONEGIG  = ONEKILO * ONEMEG
     ONETERA = ONEKILO * ONEGIG
 
-    # TODO notify for low space
     MIN_FREE_SPACE = ONETERA * 2 # Warn when run_root space is below this value
 
-    MAIN_LOOP_DELAY_SECONDS = 2
+    MAIN_LOOP_DELAY_SECONDS = 600
     RUNROOT_FREESPACE_CHECK_DELAY_SECONDS = 3600
     RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS = 3600*24
 
@@ -185,18 +184,16 @@ class Autocopy:
             self.process_rundir(rundir)
 
         if self.is_time_for_rundirs_monitored_summary():
-            self.log("Sending rundirs monitored summary\n")
             self.send_email_rundirs_monitored_summary()
 
         if self.is_time_for_runroot_freespace_check():
-            self.log("Checking runroot free space\n")
             self.check_runroot_freespace()
 
     def process_rundir(self, rundir):
         lims_runinfo = self.get_runinfo_from_lims(rundir)
 
         if self.is_rundir_aborted(lims_runinfo):
-            self.process_aborted_rundir(rundir)
+            self.process_aborted_rundir(rundir, lims_runinfo)
 
         if rundir.is_copying():
             self.process_copying_rundir(rundir, lims_runinfo)
@@ -206,13 +203,14 @@ class Autocopy:
         # it to a ready_for_copy state, and we can start the copy process
         # in process_ready_for_copy_rundir right away.
         if self.is_rundir_ready_for_copy(rundir):
+            self.log("Starting copy")
             self.process_ready_for_copy_rundir(rundir, lims_runinfo)
 
     def is_rundir_aborted(self, lims_runinfo):
         if lims_runinfo is None:
             return False
         else:
-            return lims_runinfo.get_run_status() == lims_runinfo.SEQUENCING_RUN_STATUS_FAILED
+            return lims_runinfo.has_status_sequencing_failed()
 
     def is_rundir_ready_for_copy(self, rundir):
         return rundir.is_finished()
@@ -226,9 +224,15 @@ class Autocopy:
             return "not_ready"
 
     def process_ready_for_copy_rundir(self, rundir, lims_runinfo):
+        if self.copy_processes_counter >= self.MAX_COPY_PROCESSES:
+            return
+
+        if not lims_runinfo:
+            self.send_email_run_not_found_in_lims(rundir.get_dir())
         self.start_copy(rundir)
-        # TODO fix LIMS status update
-#        lims_runinfo.set_run_status(lims_runinfo.DONE)
+        self.copy_processes_counter += 1
+        if lims_runinfo:
+            lims_runinfo.set_flags_for_sequencing_finished_analysis_started()
 
     def process_copying_rundir(self, rundir, lims_runinfo):
         # Check if the copy process finished successfully
@@ -244,27 +248,24 @@ class Autocopy:
         self.send_email_rundir_copy_failed(rundir, retcode)
         # Revert status so copy can restart.
         rundir.reset_to_copy_not_started()
+        self.copy_processes_counter -= 1
 
     def process_completed_rundir(self, rundir, lims_runinfo):
         are_files_missing = self.are_files_missing(rundir)
         lims_problems = self.check_rundir_against_lims(rundir, lims_runinfo)
         disk_usage = rundir.get_disk_usage()
         rundir.unset_copy_proc_and_set_stop_time()
-        # TODO LIMS updates?
         self.send_email_rundir_copy_complete(rundir, are_files_missing, lims_problems, disk_usage)
         os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_COMPLETED,rundir.get_dir()))
         self.rundirs_monitored.remove(rundir)
+        self.copy_processes_counter -= 1
 
-    def process_aborted_rundir(self, rundir):
+    def process_aborted_rundir(self, rundir, lims_runinfo):
         source = rundir.get_path()
         dest = os.path.join(rundir.get_root(),self.SUBDIR_ABORTED,rundir.get_dir())
         os.renames(source, dest)
         self.rundirs_monitored.remove(rundir)
-        # TODO
-        # Set all the status flags in the LIMS for this run.                                                                                                                                        
-        #        all_flags_yes_dict = {'sequencer_done': 'yes', 'analysis_done': 'yes', 'dnanexus_done': 'yes',
-        # 'notification_done': 'yes', 'archiving_done': 'yes'}
-        # flowcell = Done in LIMS
+        lims_runinfo.set_flags_for_sequencing_failed()
         self.send_email_rundir_aborted(rundir, dest)
         
     def get_freespace(self, directory):
@@ -463,28 +464,34 @@ class Autocopy:
             return None
         try:
             runinfo = RunInfo(conn=self.LIMS, run=rundir.get_dir())
-        except:
+        except Exception:
             runinfo = None
         return runinfo
 
-    def check_rundir_against_lims(self, rundir, runinfo, testproblem=None):
+    def check_rundir_against_lims(self, rundir, runinfo, test_only_dummy_problem=None):
+        # Testproblem is for testing only
         if runinfo == None:
             return []
+
         fields_to_check = [
-            ['Run name', rundir.get_dir(), runinfo.get_run_name()],
-            #TODO, all the checks in lims.lims_run_check_rundir
-#            ['Sequencer', rundir.get_machine().lower(), runinfo.get_machine().lower()],
-#            ['Data volume', rundir.get_data_volume(), runinfo.get_data_volume()],
-#            ['Local run dir', rundir.get]
+            ['Run name', rundir.get_dir(), runinfo.get_solexa_run_name()],
+            ['Sequencing instrument', rundir.get_machine().lower(), runinfo.get_sequencing_instrument().lower()],
+            # Comparing different formats e.g. "HCS 1.5.15.1" with "hcs_1.5.15.1"
+            ['Sequencer software version', rundir.get_control_software_version().replace(' ','_').replace('.','_').lower(), 
+             runinfo.get_sequencer_software().lower()],
+            ['Paired end', rundir.is_paired_end(), runinfo.is_paired_end()],
+            ['Read 1 cycles', rundir.get_read1_cycles(), runinfo.get_read1_cycles()],
+            ['Read 2 cycles', rundir.get_read2_cycles(), runinfo.get_read2_cycles()],
+            ['Is indexed', rundir.has_index_read(), runinfo.has_index_read()],
         ]
 
-        if testproblem:
-            fields_to_check.append(testproblem)
+        if test_only_dummy_problem:
+            fields_to_check.append(test_only_dummy_problem)
 
         problems_found = []
         for (field, rundirval, limsval) in fields_to_check:
             if rundirval != limsval:
-                problems_found.append('Mismatched value "%s". Value in run directory: %s. Value in LIMS: %s' % (field, rundirval, limsval))
+                problems_found.append('Mismatched value "%s". Value in run directory: "%s". Value in LIMS: "%s"' % (field, rundirval, limsval))
         return problems_found
 
     def start_copy(self, rundir, rsync=True):
@@ -590,8 +597,8 @@ class Autocopy:
     def send_email_low_freespace(self, run_root, freebytes):
         email_subj = "Insufficient free space in %s" % os.path.abspath(run_root)
         email_body = "The following run root directory:\n\n %s\n\n" % os.path.abspath(run_root)
-        email_body += "has %f GB remaining.\n\n" % (freebytes/self.ONEGIG)
-        email_body += "A warning is sent when free space is less than %f GB" % (self.MIN_FREE_SPACE/self.ONEGIG)
+        email_body += "has %s GB remaining.\n\n" % (int(freebytes/self.ONEGIG))
+        email_body += "A warning is sent when free space is less than %s GB" % (int(self.MIN_FREE_SPACE/self.ONEGIG))
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
     def send_email_rundirs_monitored_summary(self):
@@ -603,9 +610,16 @@ class Autocopy:
                 status = self.get_rundir_status(run_dir)
                 email_body += "%s\t%s\n" % (run_dir.get_dir(), status)
             email_body += "\n"
-            email_body += '\t%f GB free\n\n' % (self.get_freespace(run_root)/self.ONEGIG)
+            email_body += '\t%s GB free\n\n' % (int(self.get_freespace(run_root)/self.ONEGIG))
         self.send_email(self.EMAIL_TO, email_subj, email_body)
         self.last_rundirs_monitored_summary = datetime.datetime.now()
+
+    def send_email_run_not_found_in_lims(self, run_name):
+        email_subj = 'Run not found in LIMS %s' % run_name
+        email_body = 'Autocopy could not find run %s in the LIMS.\n' % run_name
+        email_body += 'Autocopy will proceed with the copy anyway.'
+        self.send_email(self.EMAIL_TO, email_subj, email_body)
+        
 
     def send_email(self, to, subj, body, write_email_to_log=True):
         subj_prefix = "AUTOCOPY (%s): " % self.HOSTNAME
@@ -701,8 +715,10 @@ class Autocopy:
 
     def restore_stdout_stderr(self):
         if hasattr(self, 'STDOUT_RESTORE'):
+            import sys
             sys.stdout = self.STDOUT_RESTORE
         if hasattr(self, 'STDERR_RESTORE'):
+            import sys
             sys.stderr = self.STDERR_RESTORE
 
     def initialize_signals(self):
@@ -719,118 +735,6 @@ class Autocopy:
         self.log("Received USR1 signal.")
         self.log("Sending rundirs monitored summary\n")
         self.send_email_rundirs_monitored_summary()
-
-
-        """
-    @classmethod
-    def initialize_signals(cls):
-
-        def sigUSR2(signum, frame):
-            global COPY_PROCESSES
-    
-            # Toggle whether the copying out takes place.
-            if COPY_PROCESSES != MAX_COPY_PROCESSES:
-                COPY_PROCESSES = MAX_COPY_PROCESSES
-                log("USR2 signal received: COPYING TURNED ON")
-            else:
-                COPY_PROCESSES = 0
-                log("USR2 signal received: NEW COPYING TURNED OFF")
-
-"""
-
-#    def generate_run_status_line(run_root):
-#        if self.COPY_PROCESSES == self.MAX_COPY_PROCESSES:
-#            ready_str = "Ready"
-#            newcopying_str = ""
-#        else:
-#            ready_str = "READY"
-#            newcopying_str = "(NEW COPYING TURNED OFF)"
-#        self.log("%s:" % run_root,
-#                 "%d Copying," % len(self.get_copying_rundirs(run_root)),
-#                 "%d %s," % (len(self.get_ready_rundirs(run_root)), ready_str),
-#                 "%d Running," % len(self.get_running_rundirs(run_root)),
-#                 "%d Archiving," % len(self.get_archiving_rundirs(run_root)),
-#                 "%d Completed," % len(self.get_completed_rundirs(run_root)),
-#                 "%d Aborted," % len(self.get_aborted_rundirs(run_root)),
-#                 "%d Failed" % len(self.get_failed_rundirs(run_root)),
-#                 newcopying_str)
-
-#    def generate_run_status_table(self):
-#        run_status_table = ""
-#        copying_rundirs = self.get_copying_rundirs()
-#        if self.COPY_PROCESSES == self.MAX_COPY_PROCESSES:
-#            run_status_table += "COPYING DIRECTORIES:\n"
-#        else:
-#            run_status_table += "COPYING DIRECTORIES: (New copying turned off)\n"
-#        run_status_table += "-------------------\n"
-#        if len(copying_rundirs):
-#            for rundir in copying_rundirs:
-#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-#        else:
-#            run_status_table += "None\n"
-
-#        ready_rundirs = self.get_ready_rundirs()
-#        run_status_table += "\n"
-#        run_status_table += "READY DIRECTORIES:\n"
-#        run_status_table += "-----------------\n"
-#        if len(ready_rundirs):
-#            for rundir in ready_rundirs:
-#                run_status_table += "%s %s (%s)\n" % (rundir.get_dir().ljust(32), rundir.get_root(), rundir.get_status_string())
-#        else:
-#            run_status_table += "None\n"
-
-#        running_rundirs = self.get_running_rundirs()
-#        run_status_table += "\n"
-#        run_status_table += "RUNNING DIRECTORIES:\n"
-#        run_status_table += "-------------------\n"
-#        if len(running_rundirs):
-#            for rundir in running_rundirs:
-#                #run_status_table += rundir.get_dir().ljust(32) + rundir.get_root() + "(%s)" % rundir.get_status_string()
-#                run_status_table += "%s %s (Cycle %s of %s)\n" % (rundir.get_dir().ljust(32), rundir.get_root(), rundir.get_scored_cycle(), rundir.get_total_cycles())
-#        else:
-#            run_status_table += "None\n"
-
-#        archiving_rundirs = self.get_archiving_rundirs()
-#        run_status_table += "\n"
-#        run_status_table += "ARCHIVING DIRECTORIES:\n"
-#        run_status_table += "---------------------\n"
-#        if len(archiving_rundirs):
-#            for rundir in archiving_rundirs:
-#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-#        else:
-#            run_status_table += "None\n"
-
-#        completed_rundirs = self.get_completed_rundirs()
-#        run_status_table += "\n"
-#        run_status_table += "COMPLETED DIRECTORIES:\n"
-#        run_status_table += "---------------------\n"
-#        if len(completed_rundirs):
-#            for rundir in completed_rundirs:
-#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-#        else:
-#            run_status_table += "None\n"
-
-#        aborted_rundirs = self.get_aborted_rundirs()
-#        run_status_table += "\n"
-#        run_status_table += "ABORTED DIRECTORIES:\n"
-#        run_status_table += "-------------------\n"
-#        if len(aborted_rundirs):
-#            for rundir in aborted_rundirs:
-#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-#        else:
-#            run_status_table += "None\n"
-
-#        failed_rundirs = self.get_failed_rundirs()
-#        run_status_table += "\n"
-#        run_status_table += "FAILED DIRECTORIES:\n"
-#        run_status_table += "------------------\n"
-#        if len(failed_rundirs):
-#            for rundir in failed_rundirs:
-#                run_status_table += "%s %s\n" % (rundir.get_dir().ljust(32), rundir.get_root())
-#        else:
-#            run_status_table += "None\n"
-
-#        return run_status_table
 
     def get_rundir(self, run_root=None, dirname=None):
         rundirs = self.get_rundirs(run_root=run_root, dirname=dirname)

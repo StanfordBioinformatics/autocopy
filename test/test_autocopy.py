@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-DEBUG=True
+DEBUG=False
 
 import grp
 import os
@@ -39,6 +39,11 @@ class TestAutocopy(unittest.TestCase):
         self.config = {
             "COPY_DEST_HOST": "localhost",
         }
+        self.test_run_name = '141117_MONK_0387_AC4JCDACXX'
+        self.test_run_path = os.path.join(self.tmp_dir, self.test_run_name)
+        source = os.path.realpath(os.path.join(os.path.dirname(__file__), 'testdata', 'RunRoot0', self.test_run_name))
+        dest = os.path.join(self.tmp_dir, self.test_run_name)
+        shutil.copytree(source, dest)
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir)
@@ -172,23 +177,28 @@ class TestAutocopy(unittest.TestCase):
 
     def testProcessAbortedRundir(self):
         run_root = self.tmp_dir
-        dirname='141117_MONK_0387_AC4JCDACXX'
-        source_path = os.path.join(run_root, dirname)
-        os.mkdir(source_path)
+        dirname = self.test_run_name
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config, errors_to_terminal=DEBUG)
         a.update_rundirs_monitored()
         rundir = a.get_rundir(dirname=dirname)
-        a.process_aborted_rundir(rundir)
+        runinfo = a.get_runinfo_from_lims(rundir)
+        a.process_aborted_rundir(rundir, runinfo)
 
+        
         dest_path = os.path.join(run_root, a.SUBDIR_ABORTED, dirname)
-        self.assertFalse(os.path.exists(source_path))
+        self.assertFalse(os.path.exists(self.test_run_path))
         self.assertTrue(os.path.exists(dest_path))
+
+        # These are broken because cached runinfo doesn't get updated
+        # when solexarun and solexaflowcell get updated.
+        # self.assertEqual(runinfo.getflowcellstatus(), 'done')
+        # self.assertEqual(runinfo.isanalysisdone(), True)
     
     def testProcessCompletedRundir(self):
         run_root = self.tmp_dir
-        dirname='141117_MONK_0387_AC4JCDACXX'
-        source_path = os.path.join(run_root, dirname)
-        os.mkdir(source_path)
+        dirname=self.test_run_name
+        source_path = self.test_run_path
+        
         a = Autocopy(run_root_dirs=[run_root], log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config, errors_to_terminal=DEBUG)
         a.update_rundirs_monitored()
         rundir = a.get_rundir(dirname=dirname)
@@ -226,9 +236,9 @@ class TestAutocopy(unittest.TestCase):
         self.assertEqual(len(problems_found), 0)
 
         (field, rundirval, limsval) = ('Test', '1', 'not 1')
-        problems_found = a.check_rundir_against_lims(rundir, runinfo, testproblem=(field, rundirval, limsval))
+        problems_found = a.check_rundir_against_lims(rundir, runinfo, test_only_dummy_problem=(field, rundirval, limsval))
         self.assertEqual(len(problems_found), 1)
-        self.assertEqual(problems_found[0], 'Mismatched value "%s". Value in run directory: %s. Value in LIMS: %s' % (field, rundirval, limsval))
+        self.assertEqual(problems_found[0], 'Mismatched value "%s". Value in run directory: "%s". Value in LIMS: "%s"' % (field, rundirval, limsval))
 
     def testStartCopy(self):
         run_name = '000000_RUNDIR_1234_ABCDEFG'

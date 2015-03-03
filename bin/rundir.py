@@ -160,7 +160,6 @@ class RunDir:
         self.lanes = None
 
         self.platform = None
-        self.control_software_version = None
         self.seq_kit_version = None
 
         self.copy_proc = None
@@ -178,7 +177,7 @@ class RunDir:
         s += "  Date: %s  Mach: %s  Num: %s  FC: %s\n" % (self.get_start_date(), self.get_machine(), self.get_number(), self.get_flowcell())
         s += "  Root: \t%s\n" % self.get_root()
         s += "  Status:\t%s\n" % self.get_status_string()
-        s += "  Reads:\t%d\n" % self.get_reads()
+        s += "  Reads:\t%d\n" % self.get_number_of_reads()
         s += "  Cycles:\t%s\n" % " ".join(map(lambda d: str(d), self.get_cycle_list()))
         s += "\n"
         s += "  Extracted Cycles:\t%s/%s\n" % (self.get_extracted_cycle(), self.get_total_cycles())
@@ -199,6 +198,12 @@ class RunDir:
         return self.dir
     def get_path(self):
         return os.path.join(self.root,self.dir)
+    def get_data_volume(self):
+        m = re.search(r'(IlluminaRuns[0-9]+)', self.get_root())
+        if not m:
+            return None
+        else:
+            return m.groups()[0]
 
     def get_start_date(self):
 
@@ -375,12 +380,16 @@ class RunDir:
         return self.flowcell
 
     def get_reads(self):
+        return self.get_number_of_reads()
+
+    def get_number_of_reads(self):
         if self.reads is None:
             self.find_reads_cycles()
         if self.reads is None:
             return 0
         else:
             return self.reads
+
     def get_cycle_list(self):
         if self.cycle_list is None:
             self.find_reads_cycles()
@@ -388,14 +397,34 @@ class RunDir:
             return []
         else:
             return self.cycle_list
+
     def get_total_cycles(self):
         return sum(self.get_cycle_list())
+
+    def get_read1_cycles(self):
+        cycle_list = self.get_cycle_list()
+        if len(cycle_list) < 1:
+            return 0
+        else:
+            return cycle_list[0]
+
+    def get_read2_cycles(self):
+        cycle_list = self.get_cycle_list()
+        if self.is_paired_end():
+            plus_one_for_index = 1
+        else:
+            plus_one_for_index = 0
+        if len(cycle_list) < 2 + plus_one_for_index:
+            return 0
+        else:
+            return cycle_list[1 + plus_one_for_index]
 
     def is_paired_end(self):
         if self.paired_end is None:
             self.find_reads_cycles()
         return self.paired_end
-    def is_index_read(self):
+
+    def has_index_read(self):
         if self.index_read is None:
             self.find_reads_cycles()
         return self.index_read
@@ -908,55 +937,48 @@ class RunDir:
     # loading it if necessary.
     def get_control_software_version(self, integer=False):
 
-        if not self.control_software_version:
+        if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
+            control_software_type = 'SCS'
+        elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ:
+            control_software_type = 'HCS'
+        elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ:
+            control_software_type = 'MCS'
 
-            if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
+        if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
                 
-                # Control software version is in file "RunLog-*.xml" (can pick any one).
-                # entry <Software>
-                run_log_files = glob.glob(os.path.join(self.get_path(),"RunLog_*"))
-                if len(run_log_files):
-                    run_log_doc = xml.dom.pulldom.parse(run_log_files[0])
+            # Control software version is in file "RunLog-*.xml" (can pick any one).
+            # entry <Software>
+            run_log_files = glob.glob(os.path.join(self.get_path(),"RunLog_*"))
+            if len(run_log_files):
+                run_log_doc = xml.dom.pulldom.parse(run_log_files[0])
 
-                    # Get <Software>[version attribute]
-                    for (event,node) in run_log_doc:
-                        if event=="START_ELEMENT" and node.tagName=="Software":
-                            self.control_software_version = node.getAttribute("version")
-                            break
+                # Get <Software>[version attribute]
+                for (event,node) in run_log_doc:
+                    if event=="START_ELEMENT" and node.tagName=="Software":
+                        control_software_version = node.getAttribute("version")
+                        break
                     
-            elif (self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ or
-                  self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ):
+        elif (self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ or
+              self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ):
 
-                # Control software version is in file "runParameters.xml",
-                # entry <RunParameters><Setup><ApplicationVersion> .
-                run_params_path = os.path.join(self.get_path(),"runParameters.xml")
-                if os.path.exists(run_params_path):
-                    run_params_doc = xml.dom.minidom.parse(run_params_path)
+            # Control software version is in file "runParameters.xml",
+            # entry <RunParameters><Setup><ApplicationVersion> .
+            run_params_path = os.path.join(self.get_path(),"runParameters.xml")
+            if os.path.exists(run_params_path):
+                run_params_doc = xml.dom.minidom.parse(run_params_path)
+                
+                # Get <RunParameters><Setup><ApplicationVersion> .
+                run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
+                setup_node = run_params_node.getElementsByTagName("Setup")[0]
+                appvers_node = setup_node.getElementsByTagName("ApplicationVersion")[0]
 
-                    # Get <RunParameters><Setup><ApplicationVersion> .
-                    run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
-                    setup_node = run_params_node.getElementsByTagName("Setup")[0]
-                    appvers_node = setup_node.getElementsByTagName("ApplicationVersion")[0]
+                control_software_version =  appvers_node.firstChild.nodeValue
 
-                    self.control_software_version =  appvers_node.firstChild.nodeValue
-
-            else:
-                print >> sys.stderr, "RunDir.get_control_software_version(): Platform unknown"
-                return None
-
-        # If user asked for integer output, convert the SW version to an integer.
-        if integer and self.control_software_version:
-            digits = self.control_software_version.split('.')
-
-            if len(digits) >= 3:
-                version_int = int(digits[0])*1000 + int(digits[1])*100 + int(digits[2])
-                return version_int
-            else:
-                print >> sys.stderr, "RunDir.get_control_software_version(): %s is not at least 3 digits" % (self.control_software_version)
-                return 0
         else:
-            return self.control_software_version
+            print >> sys.stderr, "RunDir.get_control_software_version(): Platform unknown"
+            return None
 
+        return "%s %s" % (control_software_type, control_software_version)
 
     def get_seq_kit_version(self):
 
