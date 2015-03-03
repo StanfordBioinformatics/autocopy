@@ -64,16 +64,11 @@
 #         and can be set in a config.json file:
 #           COPY_DEST_HOST, COPY_DEST_USER, COPY_DEST_GROUP, COPY_DEST_RUN_ROOT
 #
-# LIMS status notes
-#   These are the LIMS status fields used or set by autocopy
-#   1. SolexaRun.sequencing_status
-#      a. Has status 'sequencing' while new run is generated
-#      b. Autocopy sets to 'done' when it detects sequencing is completed
-#      c. If status 'sequencing failed' is set, autocopy transfers the run to AbortedRuns 
-#         for deletionsocket
-#      d. If status 'sequencing exception' is set, the run will not be discarded and
-#         autocopy processes it as usual.
-#   
+# Warning re aborted runs
+#   1. If SolexaRun.sequencing_status is set to 'sequencing failed' in the LIMS,
+#      autocopy will discard it by moving it to the Runs_Aborted subdirectory.
+#   2. If SolexaRun.sequencing_status is set to 'sequencing exception', autocopy
+#      will ignore it and proceed as usual.
 
 import email.mime.text
 import datetime
@@ -111,6 +106,7 @@ class Autocopy:
     LIMS_API_VERSION = 'v1'
 
     MAX_COPY_PROCESSES = 2 # Cap the number of copy procs
+                           # if --no_copy, this is set to 0.
     copy_processes_counter = 0
 
     EMAIL_TO = None
@@ -120,7 +116,8 @@ class Autocopy:
     COPY_DEST_HOST  = 'localhost'
     COPY_DEST_USER  = pwd.getpwuid(os.getuid()).pw_name
     COPY_DEST_GROUP = grp.getgrgid(pwd.getpwuid(os.getuid()).pw_gid).gr_name
-    COPY_DEST_RUN_ROOT = '~'
+    COPY_SOURCE_RUN_ROOTS = [os.getcwd()]
+    COPY_DEST_RUN_ROOT = '~/copied_runs'
 
     # Powers of two constants
     ONEKILO = 1024.0
@@ -141,20 +138,18 @@ class Autocopy:
     COPY_PROCESS_EXEC_FILENAME = "copy_rundir.py"
     COPY_PROCESS_EXEC_COMMAND = os.path.join(os.path.dirname(__file__), COPY_PROCESS_EXEC_FILENAME)
 
-    def __init__(self, run_root_dirs = None, log_file=None, no_copy=False, no_lims=False, no_email=False, test_mode_lims=False, config=None, errors_to_terminal=False):
+    def __init__(self, log_file=None, no_copy=False, no_lims=False, no_email=False, test_mode_lims=False, config=None, errors_to_terminal=False):
         self.initialize_config(config)
+        self.initialize_log_file(log_file)
+        self.log_starting_autocopy_message()
         self.initialize_no_copy_option(no_copy)
         self.initialize_hostname()
-        self.initialize_log_file(log_file)
         self.initialize_lims_connection(test_mode_lims, no_lims)
         self.initialize_mail_server(no_email)
-        self.initialize_run_roots(run_root_dirs)
+        self.initialize_run_roots()
         self.initialize_ssh_socket(no_copy)
         self.initialize_signals()
         self.redirect_stdout_stderr_to_log(errors_to_terminal)
-
-    def __del__(self):
-        self.cleanup()
 
     def cleanup(self):
         try:
@@ -292,7 +287,7 @@ class Autocopy:
             return False
 
     def check_runroot_freespace(self):
-        for run_root in self.RUN_ROOT_DIRS:
+        for run_root in self.COPY_SOURCE_RUN_ROOTS:
             freespace_bytes = self.get_freespace(run_root)
             if freespace_bytes < self.MIN_FREE_SPACE:
                 self.send_email_low_freespace(run_root, freespace_bytes)
@@ -375,15 +370,8 @@ class Autocopy:
             print >> sys.stderr, os.path.basename(__file__), ": cannot create ssh socket into", self.COPY_DEST_HOST, "( retcode =", retcode, ")"
             sys.exit(1)
 
-    def initialize_run_roots(self, run_root_dirs):
-        # If run root dirs not provided, use current directory
-        if not run_root_dirs:
-            run_root_dirs = [os.getcwd()]
-        elif not len(run_root_dirs):
-            run_root_dirs = [os.getcwd()]
-        self.RUN_ROOT_DIRS = run_root_dirs
-
-        for run_root in self.RUN_ROOT_DIRS:
+    def initialize_run_roots(self):
+        for run_root in self.COPY_SOURCE_RUN_ROOTS:
             self.create_run_root_on_disk(run_root)
 
     def create_run_root_on_disk(self, run_root):
@@ -422,7 +410,7 @@ class Autocopy:
             self.rundirs_monitored = []
 
         new_rundirs_monitored = []
-        for run_root in self.RUN_ROOT_DIRS:
+        for run_root in self.COPY_SOURCE_RUN_ROOTS:
             new_rundirs_monitored.extend(self.scan_for_rundirs(run_root))
 
         # We just removed any rundirs we found on disk from rundirs_monitored.
@@ -604,7 +592,7 @@ class Autocopy:
     def send_email_rundirs_monitored_summary(self):
         email_subj = 'Run status summary'
         email_body = ''
-        for run_root in self.RUN_ROOT_DIRS:
+        for run_root in self.COPY_SOURCE_RUN_ROOTS:
             email_body += '%s\n\n' % os.path.abspath(run_root)
             for run_dir in self.get_rundirs(run_root=run_root):
                 status = self.get_rundir_status(run_dir)
@@ -639,6 +627,11 @@ class Autocopy:
             self.log(msg.as_string())
             self.log("^------------ end email ------------^\n")
 
+
+    def log_starting_autocopy_message(self):
+        self.log('\n')
+        self.log('Autocopy is initializing\n')
+
     def log(self, *args):
         log_text = ' '.join(args)
         log_lines = log_text.split("\n")
@@ -648,8 +641,9 @@ class Autocopy:
 
     def initialize_config(self, config):
         if config is None:
-            if os.path.exists(os.path.join(os.path.dirname(__file__), 'config.json')):
-                with open(os.path.join(os.path.dirname(__file__), 'config.json')) as f:
+            DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
+            if os.path.exists(DEFAULT_CONFIG_PATH):
+                with open(DEFAULT_CONFIG_PATH) as f:
                     config = json.load(f)
 
         self.override_settings_with_config(config)
@@ -661,23 +655,26 @@ class Autocopy:
             return
 
         # Input validators
-        def validate_str(value):
+        def validate_str(key, value):
             if not (isinstance(value, str) or isinstance(value, unicode)):
                 raise ValidationError("Invalid value %s for config key %s. A string is required." %(value, key))
-        def validate_cmdline_safe_str(value):
+        def validate_cmdline_safe_str(key, value):
             pattern = '^[0-9a-zA-Z./_-]*$'
             if not re.match(pattern, value):
                 raise ValidationError("Invalid value %s for config key %s. Must be a string matched by %s" %(value, key, pattern))
-        def validate_int(value):
+        def validate_int(key, value):
             if not isinstance(value, int):
                 raise ValidationError("Invalid value %s for config key %s. An integer is required." %(value, key))
+        def validate_list(key, value):
+            if not isinstance(value, list):
+                raise ValidationError("Invalid value %s for config key %s. A list is required." %(value, key))
 
         def validate(key, value, config_fields):
             if key not in config_fields.keys():
                 raise ValidationError("Config contains invalid key %s. Valid keys are %s" % 
                                 (key, config_fields.keys()))
             run_validation_function = config_fields[key]
-            run_validation_function(value)
+            run_validation_function(key, value)
  
         config_fields = {
             'LOG_DIR_DEFAULT': validate_str,
@@ -691,6 +688,7 @@ class Autocopy:
             'COPY_DEST_USER':validate_cmdline_safe_str,
             'COPY_DEST_GROUP': validate_cmdline_safe_str,
             'COPY_DEST_RUN_ROOT': validate_cmdline_safe_str,
+            'COPY_SOURCE_RUN_ROOTS': validate_list,
             'MIN_FREE_SPACE': validate_int,
             'LOOP_DELAY_SECONDS': validate_int,
         }
@@ -715,10 +713,8 @@ class Autocopy:
 
     def restore_stdout_stderr(self):
         if hasattr(self, 'STDOUT_RESTORE'):
-            import sys
             sys.stdout = self.STDOUT_RESTORE
         if hasattr(self, 'STDERR_RESTORE'):
-            import sys
             sys.stderr = self.STDERR_RESTORE
 
     def initialize_signals(self):
@@ -755,12 +751,13 @@ class Autocopy:
 
     @classmethod
     def parse_args(cls):
-        usage = "%prog [options] run_root"
+        usage = "%prog [options]"
         parser = OptionParser(usage=usage)
 
         parser.add_option("-l", "--log_file", dest="log_file", type="string",
                           default=None,
-                          help='Log file path and filename. Use "-" to write to stdout instead of file. [default = %s/autocopy_{YYMMDD}.log]' 
+                          help='Log file path and filename. Use "-" to write to stdout instead of file. [default = %s/autocopy_{YYMMDD}.log, '\
+                          'or this directory may be overridden by LOG_DIR_DEFAULT in CONFIG_FILE]'
                           % cls.LOG_DIR_DEFAULT)
         parser.add_option("-c", "--no_copy", dest="no_copy", action="store_true",
                           default=False,
@@ -776,13 +773,9 @@ class Autocopy:
                           help='Same as "--no_copy --no_lims --no_email"')
         parser.add_option("-g", "--config", dest="config_file", type="string",
                           default=None,
-                          help='Config file to override default settings [default = ./config.json]')
+                          help='Config file to override default settings [default = {autocopy_root}/bin/config.json]')
         parser.add_option("-t", "--test_mode_lims", dest="test_mode_lims", action="store_true", default=False,
                           help="Use a simulated LIMS connection")
-        parser.add_option("-s", "--errors_to_terminal", dest="errors_to_terminal", action="store_true", default=False,
-                          help="Do not redirect all stderr and stdout to log. Set this when using the debugger, or to see error messages in the terminal.")
-        parser.add_option("-i", "--interactive", dest="interactive", action="store_true", default=False,
-                          help='Same as "--errors_to_terminal --log_file -"')
 
         (opts, args) = parser.parse_args()
         return (opts, args)
@@ -791,6 +784,9 @@ class Autocopy:
 if __name__=='__main__':
 
     (opts, args) = Autocopy.parse_args()
+
+    if args:
+        raise Exception('Extra arguments were not recognized: %s' % args)
 
     if opts.config_file:
         with open(opts.config_file) as f:
@@ -803,11 +799,6 @@ if __name__=='__main__':
     else:
         (no_lims, no_copy, no_email) = (opts.no_lims, opts.no_copy, opts.no_email)
 
-    if opts.interactive:
-        (log_file, errors_to_terminal) = ('-', True)
-    else:
-        (log_file, errors_to_terminal) = (opts.log_file, opts.errors_to_terminal)
-
-    autocopy = Autocopy(run_root_dirs=args, no_copy=no_copy, no_email=no_email, no_lims=no_lims, log_file=log_file, 
+    autocopy = Autocopy(no_copy=no_copy, no_email=no_email, no_lims=no_lims, log_file=opts.log_file, 
                         config=config, test_mode_lims=opts.test_mode_lims, errors_to_terminal=errors_to_terminal)
     autocopy.run()
