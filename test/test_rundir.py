@@ -2,7 +2,11 @@
 
 import os
 import sys
-import unittest
+
+if sys.version_info[0:2] == (2, 6):
+    import unittest2 asunittest
+else:
+    import unittest
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
 from bin.rundir import RunDir

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-DEBUG=False
+DEBUG=True
 
 import grp
 import os
@@ -9,7 +9,11 @@ import re
 import shutil
 import sys
 import tempfile
-import unittest
+
+if sys.version_info[0:2] == (2, 6):
+    import unittest2 as unittest
+else:
+    import unittest
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
 from bin.autocopy import Autocopy
@@ -278,7 +282,7 @@ class TestAutocopy(unittest.TestCase):
         }
 
         # Initialize autocopy and create the source root
-        a = Autocopy(log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=config)
+        a = Autocopy(log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=config, errors_to_terminal=DEBUG)
         a.update_rundirs_monitored()
         rundir = a.get_rundir(dirname=run_name)
         a.start_copy(rundir)

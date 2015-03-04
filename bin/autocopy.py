@@ -1,4 +1,4 @@
-#!/Usr/bin/env python
+#!/usr/bin/env python
 
 ###############################################################################
 #
@@ -174,8 +174,11 @@ class Autocopy:
 
     def _main(self):
         self.log("Starting main loop\n")
+        self.log("updating rundirs")
         self.update_rundirs_monitored()
+        self.log("processing dirs")
         for rundir in self.rundirs_monitored:
+            self.log("processing %s" % rundir.get_dir())
             self.process_rundir(rundir)
 
         if self.is_time_for_rundirs_monitored_summary():
@@ -185,7 +188,9 @@ class Autocopy:
             self.check_runroot_freespace()
 
     def process_rundir(self, rundir):
+        self.log('getting lims info')
         lims_runinfo = self.get_runinfo_from_lims(rundir)
+        self.log('done with lims')
 
         if self.is_rundir_aborted(lims_runinfo):
             if rundir.is_copying():
@@ -491,22 +496,13 @@ class Autocopy:
         return problems_found
 
     def start_copy(self, rundir, rsync=True):
-        COPY_COMPLETE_FILE = "Autocopy_complete.txt"
-        copy_cmd_list = [self.COPY_PROCESS_EXEC_COMMAND,
-                         "--host", self.COPY_DEST_HOST,
-                         "--user", self.COPY_DEST_USER,
-                         "--group", self.COPY_DEST_GROUP,
-                         "--dest_root", self.COPY_DEST_RUN_ROOT,
-                         "--status_file", COPY_COMPLETE_FILE,
-                         "--ssh_socket", self.SSH_SOCKET,
+        copy_cmd_list = ['rsync', '-rlptc', 
+                         '-e', 'ssh -S %s -l %s' %(self.SSH_SOCKET, self.COPY_DEST_USER),
+                         '--exclude=Thumbnail_Images/', 
+                         '--chmod=Dug=rwX,Do=rX,Fug=rw,Fo=r',
+                         rundir.get_path(),
+                         '%s:%s' % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT),
                      ]
-        if rsync:
-            copy_cmd_list.append("--rsync")
-        
-        # End command with run directory to copy.
-        copy_cmd_list.append(rundir.get_path())
-
-        # Copy the directory.
         copy_proc = subprocess.Popen(copy_cmd_list,
                                      stdout=self.LOG_FILE, stderr=subprocess.STDOUT)
         rundir.set_copy_proc_and_start_time(copy_proc)
@@ -646,7 +642,10 @@ class Autocopy:
         self.log('Autocopy is initializing\n')
 
     def log(self, *args):
-        log_text = ' '.join(args)
+        if len(args) > 0:
+            log_text = ' '.join(args)
+        else:
+            log_text = ''
         log_lines = log_text.split("\n")
         for line in log_lines:
             print >> self.LOG_FILE, "[%s] %s" % (datetime.datetime.now().strftime("%Y %b %d %H:%M:%S"), line)
