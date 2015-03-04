@@ -309,8 +309,9 @@ class Autocopy:
         else:
             self.LIMS = Connection(apiversion=self.LIMS_API_VERSION, local_only=is_test_mode)
 
-    def initialize_mail_server(self, no_email):
-        self.NO_EMAIL = no_email
+    def initialize_mail_server(self, no_email=None):
+        if no_email is not None:
+            self.NO_EMAIL = no_email
         if self.NO_EMAIL:
             return
 
@@ -458,7 +459,8 @@ class Autocopy:
             return None
         try:
             runinfo = RunInfo(conn=self.LIMS, run=rundir.get_dir())
-        except Exception:
+        except Exception as e:
+            self.log(e.message)
             runinfo = None
         return runinfo
 
@@ -554,7 +556,7 @@ class Autocopy:
             disk_usage_units = "Gb"
 
         if are_files_missing or (len(lims_problems) > 0):
-            email_subj = "Problems copying run dir %s" % rundir.get_dir()
+            email_subj = "Problems found. Finished copying run dir %s" % rundir.get_dir()
         else:
             email_subj = "Finished copying run dir %s" % rundir.get_dir()
 
@@ -591,8 +593,8 @@ class Autocopy:
     def send_email_low_freespace(self, run_root, freebytes):
         email_subj = "Insufficient free space in %s" % os.path.abspath(run_root)
         email_body = "The following run root directory:\n\n %s\n\n" % os.path.abspath(run_root)
-        email_body += "has %s GB remaining.\n\n" % (int(freebytes/self.ONEGIG))
-        email_body += "A warning is sent when free space is less than %s GB" % (int(self.MIN_FREE_SPACE/self.ONEGIG))
+        email_body += "has %0.1f GB remaining.\n\n" % (freebytes/self.ONEGIG)
+        email_body += "A warning is sent when free space is less than %0.1f GB" % (self.MIN_FREE_SPACE/self.ONEGIG)
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
     def send_email_rundirs_monitored_summary(self):
@@ -604,7 +606,7 @@ class Autocopy:
                 status = self.get_rundir_status(run_dir)
                 email_body += "%s\t%s\n" % (run_dir.get_dir(), status)
             email_body += "\n"
-            email_body += '\t%s GB free\n\n' % (int(self.get_freespace(run_root)/self.ONEGIG))
+            email_body += '\t%0.1f GB free\n\n' % (self.get_freespace(run_root)/self.ONEGIG)
         self.send_email(self.EMAIL_TO, email_subj, email_body)
         self.last_rundirs_monitored_summary = datetime.datetime.now()
 
@@ -627,7 +629,12 @@ class Autocopy:
         if self.NO_EMAIL:
             self.log("email suppressed because --no_email is set")
         else:
-            self.smtp.sendmail(msg['From'], to, msg.as_string())
+            try:
+                self.smtp.sendmail(msg['From'], to, msg.as_string())
+            except smtplib.SMTPServerDisconnected:
+                self.log("Lost SMTP Connection. Attempting to reconnect")
+                self.initialize_mail_server()
+                self.smtp.sendmail(msg['From'], to, msg.as_string())
         if write_email_to_log:
             self.log("v----------- begin email -----------v")
             self.log(msg.as_string())
@@ -696,7 +703,9 @@ class Autocopy:
             'COPY_DEST_RUN_ROOT': validate_cmdline_safe_str,
             'COPY_SOURCE_RUN_ROOTS': validate_list,
             'MIN_FREE_SPACE': validate_int,
-            'LOOP_DELAY_SECONDS': validate_int,
+            'MAIN_LOOP_DELAY_SECONDS': validate_int,
+            'RUNROOT_FREESPACE_CHECK_DELAY_SECONDS': validate_int,
+            'RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS': validate_int,
         }
 
         for key in config.keys():
@@ -806,5 +815,5 @@ if __name__=='__main__':
         (no_lims, no_copy, no_email) = (opts.no_lims, opts.no_copy, opts.no_email)
 
     autocopy = Autocopy(no_copy=no_copy, no_email=no_email, no_lims=no_lims, log_file=opts.log_file, 
-                        config=config, test_mode_lims=opts.test_mode_lims, errors_to_terminal=errors_to_terminal)
+                        config=config, test_mode_lims=opts.test_mode_lims)
     autocopy.run()

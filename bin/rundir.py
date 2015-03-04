@@ -411,13 +411,20 @@ class RunDir:
     def get_read2_cycles(self):
         cycle_list = self.get_cycle_list()
         if self.is_paired_end():
-            plus_one_for_index = 1
+            # Don't know how to tell if this is dual index or not,
+            # so just return the last element of the array
+            if len(cycle_list) < 3:
+                raise Exception ("Cycle list should be at least length 3 for a paired end run.")
+            if len(cycle_list) > 5:
+                raise Exception ("Cycle list should be no more than length 4 for a paired end run.")
+            return cycle_list[-1]
+        elif len(cycle_list) == 2:
+            return cycle_list[1]
+        elif len(cycle_list) == 1:
+            # There is no read2 cycle
+            return None
         else:
-            plus_one_for_index = 0
-        if len(cycle_list) < 2 + plus_one_for_index:
-            return 0
-        else:
-            return cycle_list[1 + plus_one_for_index]
+            raise Exception("Cycle list should be no more than length 2 for a non-paired end run.")
 
     def is_paired_end(self):
         if self.paired_end is None:
@@ -936,6 +943,9 @@ class RunDir:
     # This function returns the control software version for this run dir,
     # loading it if necessary.
     def get_control_software_version(self, integer=False):
+
+        control_software_type = "unknown" # overwrite if found.
+        control_software_version = "unknown" # overwrite if found.
 
         if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
             control_software_type = 'SCS'
