@@ -147,15 +147,10 @@ class Autocopy:
         self.initialize_lims_connection(test_mode_lims, no_lims)
         self.initialize_mail_server(no_email)
         self.initialize_run_roots()
-        self.initialize_ssh_socket(no_copy)
         self.initialize_signals()
         self.redirect_stdout_stderr_to_log(errors_to_terminal)
 
     def cleanup(self):
-        try:
-            self.cleanup_ssh_socket()
-        except Exception as e:
-            print e
         try:
             self.restore_stdout_stderr()
         except Exception as e:
@@ -368,20 +363,6 @@ class Autocopy:
             self.LOG_FILE = open(os.path.join(self.LOG_DIR_DEFAULT,
                                               "autocopy_%s.log" % datetime.datetime.today().strftime("%y%m%d")),'a')
 
-    def initialize_ssh_socket(self, no_copy=False):
-        if no_copy:
-            self.SSH_SOCKET = None
-            return
-
-        self.SSH_SOCKET = "/tmp/autocopy_copy_%d_%s.ssh" % (os.getpid(), time.time())
-        ssh_cmd_list = ["ssh", "-o", "ConnectTimeout=10", "-l", self.COPY_DEST_USER,
-                        "-S", self.SSH_SOCKET, "-M", "-f", "-N",
-                        self.COPY_DEST_HOST]
-        retcode = subprocess.call(ssh_cmd_list, stderr=subprocess.STDOUT)
-        if retcode:
-            print >> sys.stderr, os.path.basename(__file__), ": cannot create ssh socket into", self.COPY_DEST_HOST, "( retcode =", retcode, ")"
-            sys.exit(1)
-
     def initialize_run_roots(self):
         for run_root in self.COPY_SOURCE_RUN_ROOTS:
             self.create_run_root_on_disk(run_root)
@@ -398,15 +379,6 @@ class Autocopy:
             os.mkdir(completed_subdir, 0775)
         self.leave_ok_to_delete_readme(aborted_subdir)
         self.leave_ok_to_delete_readme(completed_subdir)
-
-    def cleanup_ssh_socket(self):
-        if not hasattr(self, 'SSH_SOCKET'):
-            return
-        if self.SSH_SOCKET is None:
-            return
-        retcode = subprocess.call(["ssh", "-O", "exit", "-S", self.SSH_SOCKET, self.COPY_DEST_HOST], stdout=self.LOG_FILE, stderr=self.LOG_FILE)
-        if retcode:
-            raise Exception("%s: cannot close ssh socket into %s ( retcode = %s )" % (os.path.basename(__file__), self.COPY_DEST_HOST, retcode))
 
     def leave_ok_to_delete_readme(self, directory):
         readme = os.path.join(directory, 'README.txt')
@@ -497,11 +469,10 @@ class Autocopy:
 
     def start_copy(self, rundir, rsync=True):
         copy_cmd_list = ['rsync', '-rlptc', 
-                         '-e', 'ssh -S %s -l %s' %(self.SSH_SOCKET, self.COPY_DEST_USER),
-                         '--exclude=Thumbnail_Images/', 
+                         '--exclude=Thumbnail_Images/',
                          '--chmod=Dug=rwX,Do=rX,Fug=rw,Fo=r',
                          rundir.get_path(),
-                         '%s:%s' % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT),
+                         '%s@%s:%s' % (self.COPY_DEST_USER, self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT),
                      ]
         copy_proc = subprocess.Popen(copy_cmd_list,
                                      stdout=self.LOG_FILE, stderr=subprocess.STDOUT)
