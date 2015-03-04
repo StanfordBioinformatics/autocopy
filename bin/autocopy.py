@@ -277,8 +277,8 @@ class Autocopy:
     def is_time_for_rundirs_monitored_summary(self):
         if self.last_rundirs_monitored_summary == None:
             return True
-        timedelta = datetime.datetime.now() - self.last_rundirs_monitored_summary
-        if timedelta.total_seconds() > self.RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS:
+        timedelta = time.time() - self.last_rundirs_monitored_summary
+        if timedelta > self.RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS:
             return True
         else:
             return False
@@ -286,8 +286,8 @@ class Autocopy:
     def is_time_for_runroot_freespace_check(self):
         if self.last_runroot_freespace_check == None:
             return True
-        timedelta = datetime.datetime.now() - self.last_runroot_freespace_check
-        if timedelta.total_seconds() > self.RUNROOT_FREESPACE_CHECK_DELAY_SECONDS:
+        timedelta = time.time() - self.last_runroot_freespace_check
+        if timedelta > self.RUNROOT_FREESPACE_CHECK_DELAY_SECONDS:
             return True
         else:
             return False
@@ -297,7 +297,7 @@ class Autocopy:
             freespace_bytes = self.get_freespace(run_root)
             if freespace_bytes < self.MIN_FREE_SPACE:
                 self.send_email_low_freespace(run_root, freespace_bytes)
-        self.last_runroot_freespace_check = datetime.datetime.now()
+        self.last_runroot_freespace_check = time.time()
 
     def initialize_hostname(self):
         hostname = socket.gethostname()
@@ -608,7 +608,7 @@ class Autocopy:
             email_body += "\n"
             email_body += '\t%0.1f GB free\n\n' % (self.get_freespace(run_root)/self.ONEGIG)
         self.send_email(self.EMAIL_TO, email_subj, email_body)
-        self.last_rundirs_monitored_summary = datetime.datetime.now()
+        self.last_rundirs_monitored_summary = time.time()
 
     def send_email_run_not_found_in_lims(self, run_name):
         email_subj = 'Run not found in LIMS %s' % run_name
