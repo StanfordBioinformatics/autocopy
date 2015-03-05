@@ -3,7 +3,7 @@
 from optparse import OptionParser
 import sys
 
-from scgpm_lims import Connection
+from scgpm_lims import Connection, RunInfo
 
 class StartRun:
 
@@ -17,8 +17,7 @@ class StartRun:
             status = 'new'
         if pipeline_run_id is None:
             # Get pipeline_run_id from the LIMS
-            (pipeline_run_id, pipeline_run) = self.conn.getpipelinerunid(run=self.run_name, status=status)
-            pipeline_run_id = pipeline_run_id
+            (pipeline_run_id, pipeline_run) = RunInfo(self.conn, self.run_name).get_pipeline_run(status=status)
         self.pipeline_run_id = pipeline_run_id
 
     def update(self):
