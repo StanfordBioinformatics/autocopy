@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 from optparse import OptionParser
-from connection import Connection
+import sys
+
+from scgpm_lims import Connection
 
 class EndRun:
 
@@ -46,4 +48,4 @@ if __name__=='__main__':
     reverse = opts.reverse
     pipeline_run_id = opts.pipeline_id
 
-    StartRun(run_name, pipeline_run_id=pipeline_run_id, reverse=reverse).update()
+    EndRun(run_name, pipeline_run_id=pipeline_run_id, reverse=reverse).update()

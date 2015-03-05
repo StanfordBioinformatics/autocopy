@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 from optparse import OptionParser
-from connection import Connection
+import sys
+
+from scgpm_lims import Connection
 
 class StartRun:
 
@@ -43,6 +45,7 @@ if __name__=='__main__':
         sys.exit(-1)
 
     run_name = args[0]
+
     reverse = opts.reverse
     pipeline_run_id = opts.pipeline_id
 
