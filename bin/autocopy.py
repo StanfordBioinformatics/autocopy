@@ -112,6 +112,9 @@ class Autocopy:
     EMAIL_TO = None
     EMAIL_FROM = None
 
+    UHTS_LIMS_URL = None
+    UHTS_LIMS_TOKEN = None
+
     # Where to copy the run directories
     COPY_DEST_HOST  = 'localhost'
     COPY_DEST_USER  = pwd.getpwuid(os.getuid()).pw_name
@@ -307,7 +310,7 @@ class Autocopy:
         if no_lims:
             self.LIMS = None
         else:
-            self.LIMS = Connection(apiversion=self.LIMS_API_VERSION, local_only=is_test_mode)
+            self.LIMS = Connection(apiversion=self.LIMS_API_VERSION, local_only=is_test_mode, lims_url=self.UHTS_LIMS_URL, lims_token=self.UHTS_LIMS_TOKEN)
 
     def initialize_mail_server(self, no_email=None):
         if no_email is not None:
@@ -469,13 +472,14 @@ class Autocopy:
 
     def start_copy(self, rundir, rsync=True):
         copy_cmd_list = ['rsync', '-rlptc', 
-                         '--exclude=Thumbnail_Images/',
+                         '-e', 'ssh -l %s' % self.COPY_DEST_USER,
+                         '--exclude=Thumbnail_Images/', 
                          '--chmod=Dug=rwX,Do=rX,Fug=rw,Fo=r',
                          rundir.get_path(),
-                         '%s@%s:%s' % (self.COPY_DEST_USER, self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT),
+                         '%s:%s' % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT),
                      ]
         copy_proc = subprocess.Popen(copy_cmd_list,
-                                     stdout=self.LOG_FILE, stderr=subprocess.STDOUT)
+                                     stdout=self.LOG_FILE, stderr=self.LOG_FILE)
         rundir.set_copy_proc_and_start_time(copy_proc)
 
     def send_email_autocopy_exception(self, exception):
@@ -676,6 +680,8 @@ class Autocopy:
             'MAIN_LOOP_DELAY_SECONDS': validate_int,
             'RUNROOT_FREESPACE_CHECK_DELAY_SECONDS': validate_int,
             'RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS': validate_int,
+            'UHTS_LIMS_URL': validate_str,
+            'UHTS_LIMS_TOKEN': validate_str,
         }
 
         for key in config.keys():
