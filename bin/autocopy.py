@@ -112,6 +112,11 @@ class Autocopy:
     EMAIL_TO = None
     EMAIL_FROM = None
 
+    AUTOCOPY_SMTP_SERVER = None
+    AUTOCOPY_SMTP_PORT = None
+    AUTOCOPY_SMTP_USERNAME = None
+    AUTOCOPY_SMTP_TOKEN = None
+
     UHTS_LIMS_URL = None
     UHTS_LIMS_TOKEN = None
 
@@ -315,47 +320,40 @@ class Autocopy:
     def initialize_mail_server(self, no_email=None):
         if no_email is not None:
             self.NO_EMAIL = no_email
-        if self.NO_EMAIL:
+        if no_email:
             return
 
-        (smtp_server, smtp_port, smtp_username, smtp_token) = self.get_mail_server_settings()
+        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)):
+                self.get_mail_server_settings_from_env()
+
+        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)):
+            self.get_mail_server_settings_from_user()
+
+        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)):
+            raise Exception("AUTOCOPY_SMTP_SERVER and AUTOCOPY_SMTP_PORT must be defined to send mail. Don't want mail? Try --no_mail.")
 
         self.log("Connecting to mail server...")
         try:
-            self.smtp = smtplib.SMTP(smtp_server, smtp_port, timeout=5)
-            self.smtp.login(smtp_username, smtp_token)
+            self.smtp = smtplib.SMTP(self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, timeout=5)
+            self.smtp.login(self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)
             self.log("success.")
         except socket.gaierror:
             print "Could not connect to SMTP server. Are you offline? Try running with --no_email."
             sys.exit(1)
 
-    def get_mail_server_settings(self):
-        settings = self.get_mail_server_settings_from_env()
-        if not all(settings):
-            settings = self.get_mail_server_settings_from_user()
-        if not all(settings):
-            raise ValidationError('SMTP server settings are required')
-        return settings
-
     def get_mail_server_settings_from_env(self):
-        smtp_server = os.getenv('AUTOCOPY_SMTP_SERVER')
-        smtp_port = os.getenv('AUTOCOPY_SMTP_PORT')
-        smtp_username = os.getenv('AUTOCOPY_SMTP_USERNAME')
-        smtp_token = os.getenv('AUTOCOPY_SMTP_TOKEN')
-        return (smtp_server, smtp_port, smtp_username, smtp_token)
+        self.AUTOCOPY_SMTP_SERVER = os.getenv('AUTOCOPY_SMTP_SERVER')
+        self.AUTOCOPY_SMTP_PORT = os.getenv('AUTOCOPY_SMTP_PORT')
+        self.AUTOCOPY_SMTP_USERNAME = os.getenv('AUTOCOPY_SMTP_USERNAME')
+        self.AUTOCOPY_SMTP_TOKEN = os.getenv('AUTOCOPY_SMTP_TOKEN')
 
-    def get_mail_server_settings_from_user(self, smtp_server, smtp_port, smtp_username, smtp_token):
+    def get_mail_server_settings_from_user(self):
         print ("SMTP server settings were not set by env variables or commandline input")
         print ("You can enter them manually now.")
-        if smtp_server is None:
-            smtp_server = raw_input("SMTP server URL: ")
-        if smtp_port is None:
-            smtp_port = raw_input("SMTP port: ")
-        if smtp_username is None:
-            smtp_username = raw_input("SMTP username: ")
-        if smtp_token is None:
-            smtp_token = raw_input("SMTP token: ")
-        return (smtp_server, smtp_port, smtp_username, smtp_token)
+        self.AUTOCOPY_SMTP_SERVER = raw_input("SMTP server URL: ")
+        self.AUTOCOPY_SMTP_PORT = raw_input("SMTP port: ")
+        self.AUTOCOPY_SMTP_USERNAME = raw_input("SMTP username: ")
+        self.AUTOCOPY_SMTP_TOKEN = raw_input("SMTP token: ")
 
     def initialize_log_file(self, log_file):
         if log_file == "-":
@@ -682,6 +680,10 @@ class Autocopy:
             'RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS': validate_int,
             'UHTS_LIMS_URL': validate_str,
             'UHTS_LIMS_TOKEN': validate_str,
+            'AUTOCOPY_SMTP_USERNAME': validate_str,
+            'AUTOCOPY_SMTP_TOKEN': validate_str,
+            'AUTOCOPY_SMTP_PORT': validate_int,
+            'AUTOCOPY_SMTP_SERVER': validate_str,
         }
 
         for key in config.keys():
