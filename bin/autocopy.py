@@ -21,10 +21,11 @@
 #       will override default settings. If saved in the install dir it will be 
 #       used automatically. Otherwise pass it to autocopy with the --config_file 
 #       setting.
-#    4. Set the env variables described below for LIMS access and MANDRILL
+#    4. Set the env variables described below for LIMS access and SMTP
 #       mail server access:
-#         AUTOCOPY_SMTP_USERNAME, AUTOCOPY_SMTP_TOKEN, AUTOCOPY_SMTP_PORT, 
-#         AUTOCOPY_SMTP_SERVER, UHTS_LIMS_URL, UHTS_LIMS_TOKEN
+#         UHTS_LIMS_URL, UHTS_LIMS_TOKEN
+#         AUTOCOPY_SMTP_SERVER, AUTOCOPY_SMTP_PORT, 
+#         (optional: AUTOCOPY_SMTP_USERNAME, AUTOCOPY_SMTP_TOKEN)
 #
 # Developer guidelines for myself
 #   1. Keep this program as stateless as possible. Avoid replicating any data that
@@ -54,7 +55,7 @@
 #      a. Communication with the LIMS is managed by the scgpm_lims class.
 #         Connection is HTTP or HTTPS. scgpm_lims uses these env variables:
 #           UHTS_LIMS_URL, UHTS_LIMS_TOKEN
-#      b. Communication with the Mandrill mail server via HTTPS. 
+#      b. Communication with the mail server via HTTPS. 
 #         Uses these env variables:
 #           AUTOCOPY_SMTP_USERNAME, AUTOCOPY_SMTP_TOKEN, 
 #           AUTOCOPY_SMTP_PORT, AUTOCOPY_SMTP_SERVER
@@ -332,19 +333,21 @@ class Autocopy:
         if no_email:
             return
 
-        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)):
+        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT)):
                 self.get_mail_server_settings_from_env()
 
-        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)):
+        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT)):
             self.get_mail_server_settings_from_user()
 
-        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)):
+        if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT)):
             raise Exception("AUTOCOPY_SMTP_SERVER and AUTOCOPY_SMTP_PORT must be defined to send mail. Don't want mail? Try --no_mail.")
 
         self.log_connecting_to_mail_server()
         try:
             self.smtp = smtplib.SMTP(self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, timeout=5)
-            self.smtp.login(self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)
+            self.smtp.starttls()
+            if self.AUTOCOPY_SMTP_USERNAME and self.AUTOCOPY_SMTP_TOKEN:
+                self.smtp.login(self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)
         except socket.gaierror:
             raise Exception("Could not connect to SMTP server. Are you offline? Try running with --no_email.")
 
