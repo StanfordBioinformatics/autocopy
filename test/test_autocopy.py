@@ -127,6 +127,25 @@ class TestAutocopy(unittest.TestCase):
             self.assertTrue(re.search('test log to file', text))
         a.cleanup()
 
+    def testLogMessages(self):
+        rundir = RunDir(self.run_root, self.test_run_name)
+        a = Autocopy(log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config, errors_to_terminal=DEBUG)
+        try:
+            raise Exception("oops")
+        except Exception as e:
+            error = e
+
+        a.log_starting_autocopy_message()
+        a.log_main_loop()
+        a.log_sleep()
+        a.log_processing_dir(rundir)
+        a.log_start_copy(rundir)
+        a.log_lims_error(error)
+        a.log_connecting_to_mail_server()
+        a.log_lost_smtp_connection()
+        a.log_reached_copy_processes_max(rundir)    
+        a.log_creating_copy_complete_sentinel_file(rundir, 'filename')
+
     def testLIMSConnection(self):
         a = Autocopy(log_file=self.tmp_file.name, no_email=True, test_mode_lims=True, config=self.config, errors_to_terminal=DEBUG)
         a.LIMS.testconnection()

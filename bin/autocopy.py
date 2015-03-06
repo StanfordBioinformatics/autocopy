@@ -172,16 +172,13 @@ class Autocopy:
             except Exception, e:
                 print e
                 self.send_email_autocopy_exception(e)
-            self.log("Sleeping for %s seconds\n" % self.MAIN_LOOP_DELAY_SECONDS)
+            self.log_sleep()
             time.sleep(self.MAIN_LOOP_DELAY_SECONDS)
 
     def _main(self):
-        self.log("Starting main loop\n")
-        self.log("updating rundirs")
+        self.log_main_loop
         self.update_rundirs_monitored()
-        self.log("processing dirs")
         for rundir in self.rundirs_monitored:
-            self.log("processing %s" % rundir.get_dir())
             self.process_rundir(rundir)
 
         if self.is_time_for_rundirs_monitored_summary():
@@ -191,9 +188,8 @@ class Autocopy:
             self.check_runroot_freespace()
 
     def process_rundir(self, rundir):
-        self.log('getting lims info')
+        self.log_processing_dir(rundir)
         lims_runinfo = self.get_runinfo_from_lims(rundir)
-        self.log('done with lims')
 
         if self.is_rundir_aborted(lims_runinfo):
             if rundir.is_copying():
@@ -212,7 +208,6 @@ class Autocopy:
         # it to a ready_for_copy state, and we can start the copy process
         # in process_ready_for_copy_rundir right away.
         if self.is_rundir_ready_for_copy(rundir):
-            self.log("Starting copy")
             self.process_ready_for_copy_rundir(rundir, lims_runinfo)
 
     def is_rundir_aborted(self, lims_runinfo):
@@ -234,10 +229,12 @@ class Autocopy:
 
     def process_ready_for_copy_rundir(self, rundir, lims_runinfo):
         if self.copy_processes_counter >= self.MAX_COPY_PROCESSES:
+            self.log_reached_copy_processes_max(rundir)
             return
 
         if not lims_runinfo:
             self.send_email_run_not_found_in_lims(rundir.get_dir())
+        self.log_start_copy(rundir)
         self.start_copy(rundir)
         self.copy_processes_counter += 1
         if lims_runinfo:
@@ -266,8 +263,20 @@ class Autocopy:
         rundir.unset_copy_proc_and_set_stop_time()
         self.send_email_rundir_copy_complete(rundir, are_files_missing, lims_problems, disk_usage)
         os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_COMPLETED,rundir.get_dir()))
+        self.create_copy_complete_sentinel_file(rundir)
         self.rundirs_monitored.remove(rundir)
         self.copy_processes_counter -= 1
+
+    def create_copy_complete_sentinel_file(self, rundir):
+        COPY_COMPLETED_SENTINEL_FILE = 'Autocopy_complete.txt'
+        self.log_creating_copy_complete_sentinel_file(rundir, COPY_COMPLETED_SENTINEL_FILE)
+        touch_cmd_list = ['ssh', 
+                          '-l', self.COPY_DEST_USER,
+                          self.COPY_DEST_HOST,
+                          'touch', os.path.join(self.COPY_DEST_RUN_ROOT, rundir.get_dir(), COPY_COMPLETED_SENTINEL_FILE)
+        ]
+        subprocess.call(touch_cmd_list,
+                        stdout=self.LOG_FILE, stderr=self.LOG_FILE)
 
     def process_aborted_rundir(self, rundir, lims_runinfo):
         source = rundir.get_path()
@@ -332,14 +341,12 @@ class Autocopy:
         if not all((self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)):
             raise Exception("AUTOCOPY_SMTP_SERVER and AUTOCOPY_SMTP_PORT must be defined to send mail. Don't want mail? Try --no_mail.")
 
-        self.log("Connecting to mail server...")
+        self.log_connecting_to_mail_server()
         try:
             self.smtp = smtplib.SMTP(self.AUTOCOPY_SMTP_SERVER, self.AUTOCOPY_SMTP_PORT, timeout=5)
             self.smtp.login(self.AUTOCOPY_SMTP_USERNAME, self.AUTOCOPY_SMTP_TOKEN)
-            self.log("success.")
         except socket.gaierror:
-            print "Could not connect to SMTP server. Are you offline? Try running with --no_email."
-            sys.exit(1)
+            raise Exception("Could not connect to SMTP server. Are you offline? Try running with --no_email.")
 
     def get_mail_server_settings_from_env(self):
         self.AUTOCOPY_SMTP_SERVER = os.getenv('AUTOCOPY_SMTP_SERVER')
@@ -408,11 +415,9 @@ class Autocopy:
 
     def scan_for_rundirs(self, run_root):
         rundirs_found_on_disk = []
-        for dirname in os.listdir(run_root): 
+        for dirname in os.listdir(run_root):
             # Get directories, not files
             if (os.path.isdir(os.path.join(run_root, dirname)) and
-                # Exclude rundir if it doesn't begin with a 6-digit start date
-                re.match("\d{6}_", dirname) and
                 # Exclude special subdirs
                 dirname not in [self.SUBDIR_COMPLETED, self.SUBDIR_ABORTED]):
                 rundirs_found_on_disk.append(self.get_or_create_rundir(run_root, dirname, remove=True))
@@ -438,7 +443,7 @@ class Autocopy:
         try:
             runinfo = RunInfo(conn=self.LIMS, run=rundir.get_dir())
         except Exception as e:
-            self.log(e.message)
+            self.log_lims_error(e)
             runinfo = None
         return runinfo
 
@@ -540,7 +545,6 @@ class Autocopy:
         for problem in lims_problems:
             email_body += "%s\n" % problem
 
-        # Send an email announcing the completed run directory copy.
         email_body += "Run:\t\t\t%s\n" % rundir.get_dir()
         email_body += "NEW LOCATION:\t\t%s:%s/%s\n" % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT, rundir.get_dir())
         email_body += "Original Location:\t%s:%s\n" % (self.HOSTNAME, rundir.get_path())
@@ -587,6 +591,7 @@ class Autocopy:
         
 
     def send_email(self, to, subj, body, write_email_to_log=True):
+        body += "\nSent at %s\n" % time.strftime('%X %x %Z') 
         subj_prefix = "AUTOCOPY (%s): " % self.HOSTNAME
         msg = email.mime.text.MIMEText(body)
         msg['Subject'] = subj_prefix + subj
@@ -601,7 +606,7 @@ class Autocopy:
             try:
                 self.smtp.sendmail(msg['From'], to, msg.as_string())
             except smtplib.SMTPServerDisconnected:
-                self.log("Lost SMTP Connection. Attempting to reconnect")
+                self.log_lost_smtp_connection()
                 self.initialize_mail_server()
                 self.smtp.sendmail(msg['From'], to, msg.as_string())
         if write_email_to_log:
@@ -613,6 +618,33 @@ class Autocopy:
     def log_starting_autocopy_message(self):
         self.log('\n')
         self.log('Autocopy is initializing\n')
+
+    def log_main_loop(self):
+        self.log("Starting main loop\n")
+
+    def log_sleep(self):
+        self.log("Sleeping for %s seconds\n" % self.MAIN_LOOP_DELAY_SECONDS)
+
+    def log_processing_dir(self, rundir):
+        self.log("processing %s" % rundir.get_dir())
+
+    def log_start_copy(self, rundir):
+        self.log("Starting copy of run %s\n" % rundir.get_dir())
+
+    def log_lims_error(self, error):
+        self.log("Encountered an error accessing the LIMS: %s" % error.message)
+
+    def log_connecting_to_mail_server(self):
+        self.log("Connecting to mail server...")
+
+    def log_lost_smtp_connection(self):
+        self.log("Lost SMTP Connection. Attempting to reconnect.")
+
+    def log_reached_copy_processes_max(self, rundir):
+        self.log("Postponing copy of run %s because MAX_COPY_PROCESSES=%s has been reached\n" % (rundir.get_dir(), self.MAX_COPY_PROCESSES))
+    
+    def log_creating_copy_complete_sentinel_file(self, rundir, filename):
+        self.log("Creating copy complete file '%s' in destination folder of run %s" % (filename, rundir.get_dir()))
 
     def log(self, *args):
         if len(args) > 0:
