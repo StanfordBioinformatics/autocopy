@@ -7,10 +7,10 @@
 	<key>UserName</key>
 	<string>nathankw</string>
 	<key>Program</key>
-	<string>/usr/local/bin/autocopy_rundir.py</string>
+	<string>/usr/local/autocopy/bin/autocopy.py</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/local/bin/autocopy_rundir.py</string>
+		<string>/usr/local/autocopy/bin/autocopy.py</string>
 	</array>
 	<key>EnableGlobbing</key>
 	<true/>
