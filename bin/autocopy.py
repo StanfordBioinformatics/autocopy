@@ -218,7 +218,7 @@ class Autocopy:
             return lims_runinfo.has_status_sequencing_failed()
 
     def is_rundir_ready_for_copy(self, rundir):
-        return rundir.is_finished()
+        return rundir.is_finished() and not rundir.is_copying()
 
     def get_rundir_status(self, rundir):
         if rundir.is_copying():
