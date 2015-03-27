@@ -485,6 +485,17 @@ class RunDir:
         self.copy_start_time = None
         self.copy_end_time = None
 
+    def kill_copy_process(self):
+        self.copy_proc.kill()
+        self.reset_to_copy_not_started()
+
+    def seconds_since_copy_started(self):
+        if self.copy_start_time == None:
+            return None
+        else:
+            timedelta = datetime.datetime.now() - self.copy_start_time
+        return timedelta.seconds
+
     def is_copying(self):
         if self.copy_proc:
             return True

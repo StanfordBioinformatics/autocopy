@@ -139,6 +139,7 @@ class Autocopy:
     MAIN_LOOP_DELAY_SECONDS = 600
     RUNROOT_FREESPACE_CHECK_DELAY_SECONDS = 3600
     RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS = 3600*24
+    SECONDS_BEFORE_COPY_RESTART = 1 #3600*24
 
     last_runroot_freespace_check = None
     last_rundirs_monitored_summary = None
@@ -247,9 +248,15 @@ class Autocopy:
         if retcode == 0:
             self.process_completed_rundir(rundir, lims_runinfo)
         elif retcode == None:
-            pass # Still copying. Do nothing.
+            if rundir.seconds_since_copy_started() > self.SECONDS_BEFORE_COPY_RESTART:
+                self.restart_copy(rundir)
+                self.send_email_copy_restarted(rundir.get_dir())
         else:
             self.process_failed_copy_rundir(rundir, retcode)
+
+    def restart_copy(self, rundir):
+        rundir.kill_copy_process()
+        self.start_copy(rundir)
 
     def process_failed_copy_rundir(self, rundir, retcode):
         self.send_email_rundir_copy_failed(rundir, retcode)
@@ -593,7 +600,14 @@ class Autocopy:
         email_body = 'Autocopy could not find run %s in the LIMS.\n' % run_name
         email_body += 'Autocopy will proceed with the copy anyway.'
         self.send_email(self.EMAIL_TO, email_subj, email_body)
-        
+
+    def send_email_copy_restarted(self, run_name):
+        email_subj = 'Stalled copy suspected. Restarted run %s' % run_name
+        email_body = 'The copy process for run %s was in progress for longer than %s hours.\n' % (run_name, self.SECONDS_BEFORE_COPY_RESTART/3600)
+        email_body += 'Just in case this was a stalled process, autocopy killed and restarted the rsync.\n'
+        email_body += 'The copy should resume where it left off.\n'
+        email_body += 'If you see this email again, you may need to troubleshoot.\n'
+        self.send_email(self.EMAIL_TO, email_subj, email_body)
 
     def send_email(self, to, subj, body, write_email_to_log=True):
         body += "\nSent at %s\n" % time.strftime('%X %x %Z') 
