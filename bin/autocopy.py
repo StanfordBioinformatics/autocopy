@@ -477,12 +477,14 @@ class Autocopy:
         return problems_found
 
     def start_copy(self, rundir, rsync=True):
+        source = rundir.get_path().rstrip('/')
+        dest = self.COPY_DEST_RUN_ROOT.rstrip('/')
         copy_cmd_list = ['rsync', '-rlptc', 
                          '-e', 'ssh -l %s' % self.COPY_DEST_USER,
                          '--exclude=Thumbnail_Images/', 
                          '--chmod=Dug=rwX,Do=rX,Fug=rw,Fo=r',
-                         rundir.get_path(),
-                         '%s:%s' % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT),
+                         source,
+                         '%s:%s' % (self.COPY_DEST_HOST, dest),
                      ]
         copy_proc = subprocess.Popen(copy_cmd_list,
                                      stdout=self.LOG_FILE, stderr=self.LOG_FILE)
