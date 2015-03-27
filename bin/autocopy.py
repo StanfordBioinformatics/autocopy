@@ -139,7 +139,7 @@ class Autocopy:
     MAIN_LOOP_DELAY_SECONDS = 600
     RUNROOT_FREESPACE_CHECK_DELAY_SECONDS = 3600
     RUNDIRS_MONITORED_SUMMARY_DELAY_SECONDS = 3600*24
-    SECONDS_BEFORE_COPY_RESTART = 1 #3600*24
+    SECONDS_BEFORE_COPY_RESTART = 3600*24
 
     last_runroot_freespace_check = None
     last_rundirs_monitored_summary = None
