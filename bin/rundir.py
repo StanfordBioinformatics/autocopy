@@ -410,21 +410,10 @@ class RunDir:
 
     def get_read2_cycles(self):
         cycle_list = self.get_cycle_list()
+        len_cycle_list = len(cycle_list)
         if self.is_paired_end():
-            # Don't know how to tell if this is dual index or not,
-            # so just return the last element of the array
-            if len(cycle_list) < 3:
-                raise Exception ("Cycle list should be at least length 3 for a paired end run.")
-            if len(cycle_list) > 5:
-                raise Exception ("Cycle list should be no more than length 4 for a paired end run.")
             return cycle_list[-1]
-        elif len(cycle_list) == 2:
-            return cycle_list[1]
-        elif len(cycle_list) == 1:
-            # There is no read2 cycle
-            return None
-        else:
-            raise Exception("Cycle list should be no more than length 2 for a non-paired end run.")
+        return None
 
     def is_paired_end(self):
         if self.paired_end is None:
