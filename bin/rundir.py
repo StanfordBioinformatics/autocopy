@@ -915,7 +915,7 @@ class RunDir:
 
 
     def get_platform(self):
-        return self.platform:
+        return self.platform
 
     def set_platform(self):
         platform = None
