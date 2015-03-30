@@ -159,7 +159,7 @@ class RunDir:
 
         self.lanes = None
 
-        self.platform = None
+        self.set_platform() #sets self.platform 
         self.seq_kit_version = None
 
         self.copy_proc = None
@@ -912,44 +912,49 @@ class RunDir:
 
     # This function returns the run platform type for this run dir,
     # calculating it if necessary.
+
+
     def get_platform(self):
+        return self.platform:
 
-        if not self.platform:
+    def set_platform(self):
+        platform = None
+        # Platform is HiSeq if file "runParameters.xml" has an
+        # entry <RunParameters><Setup><ApplicationName> which
+        # includes "HiSeq" (Also MiSeq if "MiSeq").
+        run_params_path = os.path.join(self.get_path(),"runParameters.xml")
+        if os.path.exists(run_params_path):
+            run_params_doc = xml.dom.minidom.parse(run_params_path)
 
-            # Platform is HiSeq if file "runParameters.xml" has an
-            # entry <RunParameters><Setup><ApplicationName> which
-            # includes "HiSeq" (Also MiSeq if "MiSeq").
-            run_params_path = os.path.join(self.get_path(),"runParameters.xml")
-            if os.path.exists(run_params_path):
-                run_params_doc = xml.dom.minidom.parse(run_params_path)
+            # Get <Configuration><NumberOfReads>.
+            run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
+            setup_node = run_params_node.getElementsByTagName("Setup")[0]
+            appname_node = setup_node.getElementsByTagName("ApplicationName")[0]
 
-                # Get <Configuration><NumberOfReads>.
-                run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
-                setup_node = run_params_node.getElementsByTagName("Setup")[0]
-                appname_node = setup_node.getElementsByTagName("ApplicationName")[0]
-
-                hiseq_match = re.search("^HiSeq", appname_node.firstChild.nodeValue)
-                if hiseq_match:
-                    self.platform = RunDir.PLATFORM_ILLUMINA_HISEQ
-                else:
-                    miseq_match = re.search("^MiSeq", appname_node.firstChild.nodeValue)
-                    if miseq_match:
-                        self.platform = RunDir.PLATFORM_ILLUMINA_MISEQ
-                    else:
-                        self.platform = RunDir.PLATFORM_UNKNOWN
-
-            # Platform is GA if there exists a "EventScripts" directory.
+            hiseq_match = re.search("^HiSeq", appname_node.firstChild.nodeValue)
+            if hiseq_match:
+                platform = RunDir.PLATFORM_ILLUMINA_HISEQ
             else:
-                event_scripts_path = os.path.join(self.get_path(), "EventScripts")
-
-                if (os.path.exists(event_scripts_path) and
-                    os.path.isdir(event_scripts_path)):
-                    self.platform = RunDir.PLATFORM_ILLUMINA_GA
+                miseq_match = re.search("^MiSeq", appname_node.firstChild.nodeValue)
+                if miseq_match:
+                    platform = RunDir.PLATFORM_ILLUMINA_MISEQ
                 else:
-                    # Otherwise, platform is unknown.
-                    self.platform = RunDir.PLATFORM_UNKNOWN
+                    platform = RunDir.PLATFORM_UNKNOWN
 
-        return self.platform
+        # Platform is GA if there exists a "EventScripts" directory.
+        else:
+            event_scripts_path = os.path.join(self.get_path(), "EventScripts")
+
+            if (os.path.exists(event_scripts_path) and
+                os.path.isdir(event_scripts_path)):
+                platform = RunDir.PLATFORM_ILLUMINA_GA
+            else:
+                # Otherwise, platform is unknown.
+                platform = RunDir.PLATFORM_UNKNOWN
+        if not platform:
+            raise Exception("Cannot get platform for run {run}! Exiting ...".format(run=self.dir))
+        self.platform = platform
+
 
     # This function returns the control software version for this run dir,
     # loading it if necessary.
