@@ -108,8 +108,6 @@ class Autocopy:
 
     MAX_COPY_PROCESSES = 2 # Cap the number of copy procs
                            # if --no_copy, this is set to 0.
-    copy_processes_counter = 0
-
     EMAIL_TO = None
     EMAIL_FROM = None
 
@@ -189,7 +187,23 @@ class Autocopy:
         if self.is_time_for_runroot_freespace_check():
             self.check_runroot_freespace()
 
+     def copy_processes_counter(self):
+    	count =	0
+    	for rundir in self.rundirs_monitored:
+                if rundir.is_copying():
+    		count += 1
+    	return count
+
     def process_rundir(self, rundir):
+        """
+        Function : Figures out if a run is aborted, copying, or ready to be copied, then launches the next step accordingly. 
+                   If the run is aborted, sends an email and moves the run directory to the aborted directory.
+                   If the run is copying, sends an email, moves the run directory to the copy completed folder, and decrements the autocopy counter.
+                   If the run isn't aborted or copying, then 
+                   
+        Args     : rundir - a rundir.RunDir object
+        """
+ 
         self.log_processing_dir(rundir)
         lims_runinfo = self.get_runinfo_from_lims(rundir)
 
@@ -230,7 +244,7 @@ class Autocopy:
             return "not_ready"
 
     def process_ready_for_copy_rundir(self, rundir, lims_runinfo):
-        if self.copy_processes_counter >= self.MAX_COPY_PROCESSES:
+        if self.copy_processes_counter() >= self.MAX_COPY_PROCESSES:
             self.log_reached_copy_processes_max(rundir)
             return
 
@@ -238,7 +252,6 @@ class Autocopy:
             self.send_email_run_not_found_in_lims(rundir.get_dir())
         self.log_start_copy(rundir)
         self.start_copy(rundir)
-        self.copy_processes_counter += 1
         if lims_runinfo:
             lims_runinfo.set_flags_for_sequencing_finished_analysis_started()
 
@@ -262,7 +275,6 @@ class Autocopy:
         self.send_email_rundir_copy_failed(rundir, retcode)
         # Revert status so copy can restart.
         rundir.reset_to_copy_not_started()
-        self.copy_processes_counter -= 1
 
     def process_completed_rundir(self, rundir, lims_runinfo):
         are_files_missing = self.are_files_missing(rundir)
@@ -273,7 +285,6 @@ class Autocopy:
         os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_COMPLETED,rundir.get_dir()))
         self.create_copy_complete_sentinel_file(rundir)
         self.rundirs_monitored.remove(rundir)
-        self.copy_processes_counter -= 1
 
     def create_copy_complete_sentinel_file(self, rundir):
         COPY_COMPLETED_SENTINEL_FILE = 'Autocopy_complete.txt'
