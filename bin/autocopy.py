@@ -187,12 +187,12 @@ class Autocopy:
         if self.is_time_for_runroot_freespace_check():
             self.check_runroot_freespace()
 
-     def copy_processes_counter(self):
-    	count =	0
-    	for rundir in self.rundirs_monitored:
-                if rundir.is_copying():
-    		count += 1
-    	return count
+    def copy_processes_counter(self):
+        count =	0
+        for rundir in self.rundirs_monitored:
+            if rundir.is_copying():
+                count += 1
+        return count
 
     def process_rundir(self, rundir):
         """
