@@ -188,7 +188,7 @@ class Autocopy:
             self.check_runroot_freespace()
 
     def copy_processes_counter(self):
-        count =	0
+        count = 0
         for rundir in self.rundirs_monitored:
             if rundir.is_copying():
                 count += 1
@@ -282,7 +282,11 @@ class Autocopy:
         disk_usage = rundir.get_disk_usage()
         rundir.unset_copy_proc_and_set_stop_time()
         self.send_email_rundir_copy_complete(rundir, are_files_missing, lims_problems, disk_usage)
-        os.renames(rundir.get_path(),os.path.join(rundir.get_root(),self.SUBDIR_COMPLETED,rundir.get_dir()))
+        dest = os.path.join(rundir.get_root(),self.SUBDIR_COMPLETED,rundir.get_dir())
+        try:
+            os.renames(rundir.get_path(),dest)
+        except OSError as e:
+            raise OSError("Cant move run %s to %s. %s" % (rundir.get_dir(),dest,e.message))
         self.create_copy_complete_sentinel_file(rundir)
         self.rundirs_monitored.remove(rundir)
 
@@ -300,7 +304,10 @@ class Autocopy:
     def process_aborted_rundir(self, rundir, lims_runinfo):
         source = rundir.get_path()
         dest = os.path.join(rundir.get_root(),self.SUBDIR_ABORTED,rundir.get_dir())
-        os.renames(source, dest)
+        try:
+            os.renames(source, dest)
+        except OSError as e:
+            raise OSError("Cant move run %s to %s. %s" % (rundir.get_dir(),dest,e.message))
         self.rundirs_monitored.remove(rundir)
         lims_runinfo.set_flags_for_sequencing_failed()
         self.send_email_rundir_aborted(rundir, dest)
