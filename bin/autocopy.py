@@ -99,6 +99,8 @@ class ValidationError(Exception):
 
 class Autocopy:
 
+    RUNDIR_REG = re.compile(r'^\d{6}_')
+
     LOG_DIR_DEFAULT = '/var/log'
 
     SUBDIR_COMPLETED = "Runs_Completed" # Runs are moved here after copy
@@ -445,9 +447,7 @@ class Autocopy:
         rundirs_found_on_disk = []
         for dirname in os.listdir(run_root):
             # Get directories, not files
-            if (os.path.isdir(os.path.join(run_root, dirname)) and
-                # Exclude special subdirs
-                dirname not in [self.SUBDIR_COMPLETED, self.SUBDIR_ABORTED]):
+            if (os.path.isdir(os.path.join(run_root, dirname)) and self.RUNDIR_REG.match(dirname):
                 rundirs_found_on_disk.append(self.get_or_create_rundir(run_root, dirname, remove=True))
         return rundirs_found_on_disk
 
