@@ -1,0 +1,14 @@
+{
+ "EMAIL_TO": "scg-auto-notify@lists.stanford.edu",
+ "EMAIL_FROM": "nathankw@stanford.edu",
+ "LOG_DIR_DEFAULT": "/usr/local/log/",
+ "COPY_DEST_HOST": "crick.stanford.edu",
+ "COPY_DEST_GROUP": "scg-admin",
+ "COPY_DEST_RUN_ROOT": "/srv/gsfs0/projects/seq_center/Illumina/RunsInProgress",
+ "COPY_SOURCE_RUN_ROOTS": ["/Volumes/IlluminaRuns7/Runs"],
+ "MAIN_LOOP_DELAY_SECONDS": 600,
+ "UHTS_LIMS_URL": "https://uhts.stanford.edu",
+ "UHTS_LIMS_TOKEN": "9af4cc6d83fbfd793fe4",
+ "AUTOCOPY_SMTP_PORT": 587,
+ "AUTOCOPY_SMTP_SERVER": "smtp.stanford.edu"
+}
