@@ -447,7 +447,7 @@ class Autocopy:
         rundirs_found_on_disk = []
         for dirname in os.listdir(run_root):
             # Get directories, not files
-            if (os.path.isdir(os.path.join(run_root, dirname)) and self.RUNDIR_REG.match(dirname):
+            if (os.path.isdir(os.path.join(run_root, dirname))) and self.RUNDIR_REG.match(dirname):
                 rundirs_found_on_disk.append(self.get_or_create_rundir(run_root, dirname, remove=True))
         return rundirs_found_on_disk
 
