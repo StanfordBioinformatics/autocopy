@@ -5,7 +5,7 @@
  "COPY_DEST_HOST": "crick.stanford.edu",
  "COPY_DEST_GROUP": "scg-admin",
  "COPY_DEST_RUN_ROOT": "/srv/gsfs0/projects/seq_center/Illumina/RunsInProgress",
- "COPY_SOURCE_RUN_ROOTS": ["/Volumes/IlluminaRuns7/Runs"],
+ "COPY_SOURCE_RUN_ROOTS": ["/Volumes/IlluminaRuns5/Runs","/Volumes/IlluminaRuns6/Runs"],
  "MAIN_LOOP_DELAY_SECONDS": 600,
  "UHTS_LIMS_URL": "https://uhts.stanford.edu",
  "UHTS_LIMS_TOKEN": "9af4cc6d83fbfd793fe4",
