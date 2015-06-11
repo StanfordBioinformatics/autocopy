@@ -44,6 +44,8 @@ class RunDir:
         "Base Calling Complete (Read 2)",
         "Base Calling Complete (Read 3)",
         "Base Calling Complete (Read 4)",
+        "Base Calling Complete (Read 5)",
+        "Base Calling Complete (Read 6)",
         ]
 
     # Status constants
@@ -59,9 +61,11 @@ class RunDir:
      STATUS_BASECALLING_COMPLETE_READ1,
      STATUS_BASECALLING_COMPLETE_READ2,
      STATUS_BASECALLING_COMPLETE_READ3,
-     STATUS_BASECALLING_COMPLETE_READ4) = range(STATUS_MAX_INDEX)
+     STATUS_BASECALLING_COMPLETE_READ4,
+     STATUS_BASECALLING_COMPLETE_READ5,
+     STATUS_BASECALLING_COMPLETE_READ6) = range(STATUS_MAX_INDEX)
 
-    # Status files
+    # Status files that the Illumina sequencers write out.
     STATUS_FILES= [
         None,
         "First_Base_Report.txt",
@@ -75,6 +79,8 @@ class RunDir:
         "Basecalling_Netcopy_complete_READ2.txt",
         "Basecalling_Netcopy_complete_READ3.txt",
         "Basecalling_Netcopy_complete_READ4.txt",
+        "Basecalling_Netcopy_complete_READ5.txt",
+        "Basecalling_Netcopy_complete_READ6.txt",
     ]
 
     #
@@ -526,6 +532,10 @@ class RunDir:
                     return status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
                 elif self.get_reads() == 4:
                     return status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
+                elif self.get_reads() == 5:
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ5
+                elif self.get_reads() == 6:
+                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ6
                 else:
                     print >> sys.stderr, "RunDir.is_finished(): %s: Unexpected number of reads: %d" % (self.get_dir(), self.get_reads())
                     return False
@@ -542,6 +552,10 @@ class RunDir:
                 return status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
             elif self.get_reads() == 4:
                 return status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
+            elif self.get_reads() == 5:
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ5
+            elif self.get_reads() == 6:
+                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ6
             else:
                 print >> sys.stderr, "RunDir.is_finished(): %s: Unexpected number of reads: %d" % (self.get_dir(), self.get_reads())
                 return False
