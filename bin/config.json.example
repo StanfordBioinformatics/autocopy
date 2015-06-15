@@ -1,9 +1,0 @@
-{
- "EMAIL_TO": "nhammond@stanford.edu",
- "EMAIL_FROM": "nathankw@stanford.edu",
- "LOG_DIR_DEFAULT": "/usr/local/log",
- "COPY_DEST_HOST": "crick.stanford.edu",
- "COPY_DEST_GROUP": "scg-admin",
- "COPY_DEST_RUN_ROOT": "/srv/gsfs0/projects/seq_center/Illumina/RunsInProgress",
- "COPY_SOURCE_RUN_ROOTS": ["/Volumes/IlluminaRuns1/Runs"]
-}
