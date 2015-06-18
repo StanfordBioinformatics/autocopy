@@ -165,7 +165,8 @@ class RunDir:
 
         self.lanes = None
 
-        self.set_platform() #sets self.platform 
+        self.platform = None
+        self.control_software_version = None
         self.seq_kit_version = None
 
         self.copy_proc = None
@@ -191,7 +192,7 @@ class RunDir:
         s += "  Scored Cycles:\t%s/%s\n" % (self.get_scored_cycle(),self.get_total_cycles())
         s += "\n"
         s += "  Platform:\t%s\n" % RunDir.PLATFORM_NAMES[self.get_platform()]
-        s += "  SW Version:\t%s\n" % self.get_control_software_version()
+        s += "  SW Version:\t%s\n" % self.get_control_software_version_string()
         s += "  Lanes:\t%s\n" % self.get_lanes()
         return s
 
@@ -517,7 +518,7 @@ class RunDir:
                 return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
             
         elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ:
-            sw_version = self.get_control_software_version(integer=True)
+            sw_version = self.get_control_software_version_integer()
             if sw_version == 1137:  # "1.1.37"
                 if self.get_reads() == 1:
                     return status == RunDir.STATUS_BASECALLING_COMPLETE_SINGLEREAD
@@ -915,99 +916,134 @@ class RunDir:
 
     # This function returns the run platform type for this run dir,
     # calculating it if necessary.
-
-
     def get_platform(self):
-        return self.platform
 
-    def set_platform(self):
-        platform = None
-        # Platform is HiSeq if file "runParameters.xml" has an
-        # entry <RunParameters><Setup><ApplicationName> which
-        # includes "HiSeq" (Also MiSeq if "MiSeq").
-        run_params_path = os.path.join(self.get_path(),"runParameters.xml")
-        if os.path.exists(run_params_path):
-            run_params_doc = xml.dom.minidom.parse(run_params_path)
+        if self.platform is None:
 
-            # Get <Configuration><NumberOfReads>.
-            run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
-            setup_node = run_params_node.getElementsByTagName("Setup")[0]
-            appname_node = setup_node.getElementsByTagName("ApplicationName")[0]
+            # Platform is HiSeq if file "runParameters.xml" has an
+            # entry <RunParameters><Setup><ApplicationName> which
+            # includes "HiSeq" (Also MiSeq if "MiSeq").
+            run_params_path = os.path.join(self.get_path(),"runParameters.xml")
+            if os.path.exists(run_params_path):
+                run_params_doc = xml.dom.minidom.parse(run_params_path)
 
-            hiseq_match = re.search("^HiSeq", appname_node.firstChild.nodeValue)
-            if hiseq_match:
-                platform = RunDir.PLATFORM_ILLUMINA_HISEQ
-            else:
-                miseq_match = re.search("^MiSeq", appname_node.firstChild.nodeValue)
-                if miseq_match:
-                    platform = RunDir.PLATFORM_ILLUMINA_MISEQ
+                # Get <Configuration><NumberOfReads>.
+                run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
+                setup_node = run_params_node.getElementsByTagName("Setup")[0]
+                appname_node = setup_node.getElementsByTagName("ApplicationName")[0]
+
+                hiseq_match = re.search("^HiSeq", appname_node.firstChild.nodeValue)
+                if hiseq_match:
+                    self.platform = RunDir.PLATFORM_ILLUMINA_HISEQ
                 else:
-                    platform = RunDir.PLATFORM_UNKNOWN
+                    miseq_match = re.search("^MiSeq", appname_node.firstChild.nodeValue)
+                    if miseq_match:
+                        self.platform = RunDir.PLATFORM_ILLUMINA_MISEQ
+                    else:
+                        self.platform = RunDir.PLATFORM_UNKNOWN
 
-        # Platform is GA if there exists a "EventScripts" directory.
-        else:
-            event_scripts_path = os.path.join(self.get_path(), "EventScripts")
-
-            if (os.path.exists(event_scripts_path) and
-                os.path.isdir(event_scripts_path)):
-                platform = RunDir.PLATFORM_ILLUMINA_GA
+            # Platform is GA if there exists a "EventScripts" directory.
             else:
-                # Otherwise, platform is unknown.
-                platform = RunDir.PLATFORM_UNKNOWN
-        if not platform:
-            raise Exception("Cannot get platform for run {run}! Exiting ...".format(run=self.dir))
-        self.platform = platform
+                event_scripts_path = os.path.join(self.get_path(), "EventScripts")
+
+                if (os.path.exists(event_scripts_path) and
+                    os.path.isdir(event_scripts_path)):
+                    self.platform = RunDir.PLATFORM_ILLUMINA_GA
+                else:
+                    # Otherwise, platform is unknown.
+                    self.platform = RunDir.PLATFORM_UNKNOWN
+
+            if self.platform is None or self.platform == RunDir.PLATFORM_UNKNOWN:
+                raise Exception("Cannot get platform for run {run}! Exiting ...".format(run=self.dir))
+
+        return self.platform
 
 
     # This function returns the control software version for this run dir,
     # loading it if necessary.
-    def get_control_software_version(self, integer=False):
+    def get_control_software_version(self):
 
-        control_software_type = "unknown" # overwrite if found.
-        control_software_version = "unknown" # overwrite if found.
+        if self.control_software_version is None:
 
-        if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
+            if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
+
+                # Control software version is in file "RunLog-*.xml" (can pick any one).
+                # entry <Software>
+                run_log_files = glob.glob(os.path.join(self.get_path(),"RunLog_*"))
+                if len(run_log_files):
+                    run_log_doc = xml.dom.pulldom.parse(run_log_files[0])
+
+                    # Get <Software>[version attribute]
+                    for (event,node) in run_log_doc:
+                        if event=="START_ELEMENT" and node.tagName=="Software":
+                            self.control_software_version = node.getAttribute("version")
+                            break
+
+            elif (self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ or
+                  self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ):
+
+                # Control software version is in file "runParameters.xml",
+                # entry <RunParameters><Setup><ApplicationVersion> .
+                run_params_path = os.path.join(self.get_path(),"runParameters.xml")
+                if os.path.exists(run_params_path):
+                    run_params_doc = xml.dom.minidom.parse(run_params_path)
+
+                    # Get <RunParameters><Setup><ApplicationVersion> .
+                    run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
+                    setup_node = run_params_node.getElementsByTagName("Setup")[0]
+                    appvers_node = setup_node.getElementsByTagName("ApplicationVersion")[0]
+
+                    self.control_software_version =  appvers_node.firstChild.nodeValue
+
+            else:
+                print >> sys.stderr, "RunDir.get_control_software_version(): Platform unknown"
+                return None
+
+        return self.control_software_version
+
+    #
+    # Get string with control software type (derived from the platform) plus
+    #  the control software version.
+    #
+    def get_control_software_version_string(self):
+
+        platform = self.get_platform()
+        if platform == RunDir.PLATFORM_ILLUMINA_GA:
             control_software_type = 'SCS'
-        elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ:
+        elif platform == RunDir.PLATFORM_ILLUMINA_HISEQ:
             control_software_type = 'HCS'
-        elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ:
+        elif platform == RunDir.PLATFORM_ILLUMINA_MISEQ:
             control_software_type = 'MCS'
-
-        if self.get_platform() == RunDir.PLATFORM_ILLUMINA_GA:
-                
-            # Control software version is in file "RunLog-*.xml" (can pick any one).
-            # entry <Software>
-            run_log_files = glob.glob(os.path.join(self.get_path(),"RunLog_*"))
-            if len(run_log_files):
-                run_log_doc = xml.dom.pulldom.parse(run_log_files[0])
-
-                # Get <Software>[version attribute]
-                for (event,node) in run_log_doc:
-                    if event=="START_ELEMENT" and node.tagName=="Software":
-                        control_software_version = node.getAttribute("version")
-                        break
-                    
-        elif (self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ or
-              self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ):
-
-            # Control software version is in file "runParameters.xml",
-            # entry <RunParameters><Setup><ApplicationVersion> .
-            run_params_path = os.path.join(self.get_path(),"runParameters.xml")
-            if os.path.exists(run_params_path):
-                run_params_doc = xml.dom.minidom.parse(run_params_path)
-                
-                # Get <RunParameters><Setup><ApplicationVersion> .
-                run_params_node = run_params_doc.getElementsByTagName("RunParameters")[0]
-                setup_node = run_params_node.getElementsByTagName("Setup")[0]
-                appvers_node = setup_node.getElementsByTagName("ApplicationVersion")[0]
-
-                control_software_version =  appvers_node.firstChild.nodeValue
-
         else:
-            print >> sys.stderr, "RunDir.get_control_software_version(): Platform unknown"
-            return None
+            control_software_type = 'UNKNOWN'
 
-        return "%s %s" % (control_software_type, control_software_version)
+        control_software_version = self.get_control_software_version()
+        if control_software_version is not None:
+            return "%s %s" % (control_software_type, control_software_version)
+        else:
+            return "%s UNKNOWN" % (control_software_type)
+
+    #
+    # Convert the software version string into an integer.
+    #
+    # Assumption: String is of the form X.X.X or X.X.XX, where X is a digit.
+    #
+    def get_control_software_version_integer(self):
+
+        sw_version = self.get_control_software_version()
+        if sw_version is None:
+            return None
+        else:
+            # convert the SW version to an integer.
+            digits = self.control_software_version.split('.')
+
+            if len(digits) >= 3:
+                version_int = int(digits[0])*1000 + int(digits[1])*100 + int(digits[2])
+                return version_int
+            else:
+                print >> sys.stderr, "RunDir.get_control_software_version_integer(): %s is not at least 3 digits" % (sw_version)
+                return 0
+
 
     def get_seq_kit_version(self):
 

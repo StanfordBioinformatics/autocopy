@@ -74,7 +74,7 @@ def validate(rundir, cif=False, verbose=False):
     for lane in lane_list:
         # GA, HCS 1.1.37: Confirm that the 's_<lane>_00<tile>_pos.txt' files exist in Data/Intensities/.
         if (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_GA or
-            rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ):
+            (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version_integer() < 1308)):
             intensities_files = os.listdir(intensities_path)
             for tile in tile_list:
                 pos_file = "s_%d_%04d_pos.txt" % (lane, tile)
@@ -92,7 +92,7 @@ def validate(rundir, cif=False, verbose=False):
 
         # As of HCS 1.3.8: Confirm that the 's_<lane>_<tile>.clocs' files exist in Data/Intensities/L00<lane>.
         intensities_lane_files = os.listdir(intensities_lane_path)
-        if (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version(integer=True) >= 1308):
+        if (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version_integer() >= 1308):
             for tile in tile_list:
                  pos_file = "s_%d_%04d.clocs" % (lane, tile)
                  if pos_file not in intensities_lane_files:
@@ -157,9 +157,9 @@ def validate(rundir, cif=False, verbose=False):
     if len(missing_position_files) > 0:
         exit_status = False
         if (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_GA or
-            (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version(integer=True) <= 1137)): # "1.1.37"
+            (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version_integer() <= 1137)): # "1.1.37"
             position_file_ext = "_pos.txt"
-        elif (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version(integer=True) >= 1308):
+        elif (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version_integer() >= 1308):
             position_file_ext = ".clocs"
         elif (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_MISEQ):
             position_file_ext = ".locs"
@@ -200,7 +200,7 @@ def validate(rundir, cif=False, verbose=False):
 
     # GA, HCS v 1.1.37.8: Confirm that .filter files exist in Data/Intensities/BaseCalls.
     if (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_GA or
-        (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version(integer=True) <= 1137)): # "1.1.37"
+        (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version_integer() <= 1137)): # "1.1.37"
         missing_filter_files = []
         for lane in lane_list:
             for tile in tile_list:
@@ -231,7 +231,7 @@ def validate(rundir, cif=False, verbose=False):
         basecalls_lane_files = os.listdir(basecalls_lane_path)
 
         # As of HCS v 1.3.8: Confirm that .filter files exist in Data/Intensities/BaseCalls/L00<lane>.
-        if (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version(integer=True) >= 1308):
+        if (rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version_integer() >= 1308):
             missing_filter_files = []
             for tile in tile_list:
                 tile_prefix = "s_%d_%04d" % (lane, tile)
@@ -297,7 +297,7 @@ def validate(rundir, cif=False, verbose=False):
                 if len(missing_cycle_dirs) > MAX_VERBOSE_COUNT:
                     print >> sys.stderr, "[...%d more items]" % (len(missing_cycle_dirs) - MAX_VERBOSE_COUNT)
 
-        if ((rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version(integer=True) >= 1308) and
+        if ((rundir.get_platform() == rundir.PLATFORM_ILLUMINA_HISEQ and rundir.get_control_software_version_integer() >= 1308) and
             len(missing_filter_files) > 0):
             exit_status = False
             print >> sys.stderr, "validate(): %s: Missing %d Data/Intensities/BaseCalls/L%03d .filter files" % (rundir.get_dir(),len(missing_filter_files),lane)
