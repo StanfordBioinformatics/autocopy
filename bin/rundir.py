@@ -1160,10 +1160,7 @@ if __name__ == "__main__":
 
         if opts.validate:
             print
-            if rundir.get_status() != RunDir.STATUS_RUN_ABORTED:
-                if rundir_utils.validate(rundir,cif=opts.cif,verbose=True):
-                    print "%s validated" % dir
-                else:
-                    print "%s has problems" % dir
+            if rundir_utils.validate(rundir,cif=opts.cif,verbose=True):
+                print "%s validated" % dir
             else:
-                print "%s was aborted" % dir
+                print "%s has problems" % dir
