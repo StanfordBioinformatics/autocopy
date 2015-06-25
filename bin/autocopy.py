@@ -484,7 +484,7 @@ class Autocopy:
             ['Run name', rundir.get_dir(), runinfo.get_solexa_run_name()],
             ['Sequencing instrument', rundir.get_machine().lower(), runinfo.get_sequencing_instrument().lower()],
             # Comparing different formats e.g. "HCS 1.5.15.1" with "hcs_1.5.15.1"
-            ['Sequencer software version', rundir.get_control_software_version().replace(' ','_').replace('.','_').lower(), 
+            ['Sequencer software version', rundir.get_control_software_version_string().replace(' ','_').replace('.','_').lower(),
              runinfo.get_sequencer_software().lower()],
             ['Paired end', rundir.is_paired_end(), runinfo.is_paired_end()],
             ['Read 1 cycles', rundir.get_read1_cycles(), runinfo.get_read1_cycles()],
