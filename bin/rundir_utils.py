@@ -973,7 +973,8 @@ def make_archive_tar(rundir, **opts):
 
     # Rename the temporary InterOp tar file to the final tar file name.
     if ssh_socket is None:
-        os.rename(interop_tar_path_tmp, interop_tar_path)
+        if os.path.exists(interop_tar_path_tmp):
+            os.rename(interop_tar_path_tmp, interop_tar_path)
     else:
         if not remote_rename(ssh_socket,interop_tar_path_tmp, interop_tar_path):
             print >> sys.stderr, "make_archive_tar(): Error creating InterOp tar file %s (ret = %d)" % (interop_tar_path_tmp, retcode)
