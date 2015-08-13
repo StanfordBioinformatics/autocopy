@@ -8,7 +8,7 @@
 # autocopy.py -h for help
 #
 # AUTHORS:
-#   Keith Bettinger, Nathan Hammond
+#   Keith Bettinger, Nathan Hammond, Nathaniel Watson
 #
 ###############################################################################
 
@@ -200,14 +200,14 @@ class Autocopy:
         """
         Function : Figures out if a run is aborted, copying, or ready to be copied, then launches the next step accordingly. 
                    If the run is aborted, sends an email and moves the run directory to the aborted directory.
-                   If the run is copying, sends an email, moves the run directory to the copy completed folder, and decrements the autocopy counter.
+                   If the run is copying, sends an email, moves the run directory to the copy completed folder.
                    If the run isn't aborted or copying, then 
                    
         Args     : rundir - a rundir.RunDir object
         """
  
         self.log_processing_dir(rundir)
-        lims_runinfo = self.get_runinfo_from_lims(rundir)
+        lims_runinfo = self.get_runinfo_from_lims(rundirObject=rundir)
 
         if self.is_rundir_aborted(lims_runinfo):
             if rundir.is_copying():
@@ -273,10 +273,15 @@ class Autocopy:
         rundir.kill_copy_process()
         self.start_copy(rundir)
 
-    def process_failed_copy_rundir(self, rundir, retcode):
-        self.send_email_rundir_copy_failed(rundir, retcode)
+    def process_failed_copy_rundir(self,rundir,retcode):
+        """
+        Args : rundirObject - a rundir.RunDir instance.
+        """
+        rundirPath = rundir.get_path()
+        self.send_email_rundir_copy_failed(rundirPath=rundirPath,retcode=retcode)
         # Revert status so copy can restart.
-        rundir.reset_to_copy_not_started()
+        if rundir:
+            rundir.reset_to_copy_not_started()
 
     def process_completed_rundir(self, rundir, lims_runinfo):
         are_files_missing = self.are_files_missing(rundir)
@@ -303,16 +308,21 @@ class Autocopy:
         subprocess.call(touch_cmd_list,
                         stdout=self.LOG_FILE, stderr=self.LOG_FILE)
 
-    def process_aborted_rundir(self, rundir, lims_runinfo):
-        source = rundir.get_path()
-        dest = os.path.join(rundir.get_root(),self.SUBDIR_ABORTED,rundir.get_dir())
+    def process_aborted_rundir(self,lims_runinfo,rundirObject=None,rundirPath=None):
+        if rundirObject:
+            rundirPath = rundirObject.get_path()
+        rundirPathBasename = os.path.dirname(rundirPath)
+        rundirName = os.path.basename(rundirPath)
+            
+        dest = os.path.join(rundirPathBasename,self.SUBDIR_ABORTED,rundirName)
         try:
-            os.renames(source, dest)
+            os.renames(rundirPath, dest)
         except OSError as e:
-            raise OSError("Cant move run %s to %s. %s" % (rundir.get_dir(),dest,e.message))
-        self.rundirs_monitored.remove(rundir)
+            raise OSError("Cant move run %s to %s. %s" % (rundirName,dest,e.message))
+        if rundirObject:
+            self.rundirs_monitored.remove(rundir)
         lims_runinfo.set_flags_for_sequencing_failed()
-        self.send_email_rundir_aborted(rundir, dest)
+        self.send_email_rundir_aborted(rundirPath=rundirPath,dest_path=dest)
         
     def get_freespace(self, directory):
         stats = os.statvfs(directory)
@@ -425,8 +435,6 @@ class Autocopy:
                 f.write('Runs in this directory are generally OK to delete.')
 
     def update_rundirs_monitored(self):
-        # sync rundirs_monitored with what's on disk
-
         if not hasattr(self, 'rundirs_monitored'):
             # Initialize this instance var once after startup
             self.rundirs_monitored = []
@@ -438,10 +446,9 @@ class Autocopy:
         # We just removed any rundirs we found on disk from rundirs_monitored.
         # Any dirs left are what we couldn't find on disk.
         # Send email warning and then forget them.
-        for missing_rundir in self.rundirs_monitored:
-            self.send_email_missing_rundir(missing_rundir)
-
-        self.rundirs_monitored = new_rundirs_monitored
+#        for missing_rundir in self.rundirs_monitored:
+#            self.send_email_missing_rundir(missing_rundir)
+#        self.rundirs_monitored = new_rundirs_monitored
 
     def scan_for_rundirs(self, run_root):
         rundirs_found_on_disk = []
@@ -452,24 +459,39 @@ class Autocopy:
         return rundirs_found_on_disk
 
     def get_or_create_rundir(self, run_root, dirname, remove=False):
+        rundirPath = os.path.join(run_root,dirname)
         matching_rundir = self.get_rundir(run_root=run_root, dirname=dirname)
         if matching_rundir:
             if remove:
                 self.rundirs_monitored.remove(matching_rundir)
             return matching_rundir
         else:
-            return RunDir(run_root, dirname)
+            #Don't create a rundir object unless we know that in the LIMS it's not aborted or failed.
+            # If it's aborted or failed, then there may not be the required run directory files needed
+            # to create a RunDir object. For example, the platform will be set to "Unknown" if a HiSeq doens't
+            # have the runParameters.xml file, and that will resultin the rundir.py script raising an Exception.
+
+            #Before creating the RunDir object, need to check UHTS to make sure it's not aborted or failed.
+            #Note that the possible sequncing run statuses in UHTS are given in app/helpers/sequencing_run_status.rb in the RAILS app.
+            limsRunInfo = self.get_runinfo_from_lims(rundirName=dirname)
+            if limsRunInfo.has_status_sequencing_failed():
+                self.process_aborted_rundir(lims_runinfo=limsRunInfo,rundirPath=rundirPath)
+            
+            rundir = RunDir(run_root, dirname)
+            return rundir
 
     def are_files_missing(self, rundir):
         # Check that the run directory has all the right files.
         files_missing = not rundir_utils.validate(rundir)
         return files_missing
 
-    def get_runinfo_from_lims(self, rundir):
+    def get_runinfo_from_lims(self, rundirObject=None,rundirName=None):
         if self.LIMS == None:
             return None
+        if not rundirName:
+            rundirName = rundirObject.get_dir()
         try:
-            runinfo = RunInfo(conn=self.LIMS, run=rundir.get_dir())
+            runinfo = RunInfo(conn=self.LIMS, run=rundirName)
         except Exception as e:
             self.log_lims_error(e)
             runinfo = None
@@ -532,27 +554,31 @@ class Autocopy:
         email_body = "The Autocopy Daemon received a kill signal and is shutting down.\n\n"
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
-    def send_email_rundir_aborted(self, rundir, dest_path):
-        email_subj = "Run Directory Aborted: %s" % rundir.get_dir()
+    def send_email_rundir_aborted(self, rundirPath,dest_path):
+        rundirName = os.path.basename(rundirPath)
+        email_subj = "Run Directory Aborted: %s" % rundirName
         email_body = "The following run was flagged as 'sequencing failed' in the LIMS:\n\n"
-        email_body += "\t%s\n\n" % rundir.get_dir()
+        email_body += "\t%s\n\n" % rundirName
         email_body += "It has been moved to this directory:"
         email_body += "\t%s\n\n" % dest_path
         email_body += "If this was an error, please correct the sequencing status in the LIMS and manually move the run out of the %s folder.\n\n" % self.SUBDIR_ABORTED
         email_body += "Otherwise, this run may be safely deleted to free up disk space."
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
-    def send_email_rundir_copy_failed(self, rundir, retcode):
-        email_subj = "ERROR COPYING Run Dir " + rundir.get_dir()
+    def send_email_rundir_copy_failed(self, rundirPath, retcode):
+        rundirName = os.path.basename(rundirPath)
+        email_subj = "ERROR COPYING Run Dir " + rundirName
         email_body = "Please try to resolve the error. Autocopy will continue attempting to copy as long as the run remains in the run_root directory.\n\n"
-        email_body = "Run:\t\t\t%s\n" % rundir.get_dir()
-        email_body += "Original Location:\t%s:%s\n" % (self.HOSTNAME, rundir.get_path())
+        email_body = "Run:\t\t\t%s\n" % rundirName
+        email_body += "Original Location:\t%s:%s\n" % (self.HOSTNAME, rundirPath)
         email_body += "\n"
-        email_body += "FAILED TO COPY to:\t%s:%s/%s\n" % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT, rundir.get_dir())
+        email_body += "FAILED TO COPY to:\t%s:%s/%s\n" % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT, rundirName)
         email_body += "Return code:\t%d\n" % retcode
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
     def send_email_rundir_copy_complete(self, rundir, are_files_missing, lims_problems, disk_usage):
+        rundirName = rundir.get_dir()
+        rundirPath = rundir.get_path()
         if disk_usage > self.ONEKILO:
             disk_usage /= self.ONEKILO
             disk_usage_units = "Tb"
@@ -560,24 +586,24 @@ class Autocopy:
             disk_usage_units = "Gb"
 
         if are_files_missing or (len(lims_problems) > 0):
-            email_subj = "Problems found. Finished copying run dir %s" % rundir.get_dir()
+            email_subj = "Problems found. Finished copying run dir %s" % rundirName
         else:
-            email_subj = "Finished copying run dir %s" % rundir.get_dir()
+            email_subj = "Finished copying run dir %s" % rundirName
 
-        email_body = 'Finished copying run %s\n\n' % rundir.get_dir()
+        email_body = 'Finished copying run %s\n\n' % rundirName
 
         if are_files_missing:
             email_body += "*** RUN HAS MISSING FILES ***\n\n"
 
         if len(lims_problems) > 0:
-            email_body = "%s: *** RUN HAS INCONSISTENCIES WITH LIMS\n\n" % rundir.get_dir()
+            email_body = "%s: *** RUN HAS INCONSISTENCIES WITH LIMS\n\n" % rundirName
             email_body = "Check the problems below and correct any errors in the LIMS:\n\n"
         for problem in lims_problems:
             email_body += "%s\n" % problem
 
-        email_body += "Run:\t\t\t%s\n" % rundir.get_dir()
-        email_body += "NEW LOCATION:\t\t%s:%s/%s\n" % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT, rundir.get_dir())
-        email_body += "Original Location:\t%s:%s\n" % (self.HOSTNAME, rundir.get_path())
+        email_body += "Run:\t\t\t%s\n" % rundirName
+        email_body += "NEW LOCATION:\t\t%s:%s/%s\n" % (self.COPY_DEST_HOST, self.COPY_DEST_RUN_ROOT, rundirName)
+        email_body += "Original Location:\t%s:%s\n" % (self.HOSTNAME, rundirPath)
         email_body += "\n"
         email_body += "Read count:\t\t%d\n" % rundir.get_reads()
         email_body += "Cycles:\t\t\t%s\n" % " ".join(map(lambda d: str(d), rundir.get_cycle_list()))
@@ -587,9 +613,10 @@ class Autocopy:
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
     def send_email_missing_rundir(self, rundir):
-        email_subj = "Missing Run Dir %s" % rundir.get_dir()
-        email_body = "MISSING RUN:\t%s\n" % rundir.get_dir()
-        email_body += "Location:\t%s:%s/%s\n\n" % (self.HOSTNAME, rundir.get_root(), rundir.get_dir())
+        rundirName = rundir.get_dir()
+        email_subj = "Missing Run Dir %s" % rundirName
+        email_body = "MISSING RUN:\t%s\n" % rundirName
+        email_body += "Location:\t%s:%s/%s\n\n" % (self.HOSTNAME, rundirName, rundirName)
         email_body += "Autocopy was tracking this run, but can no longer find it on disk."
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
