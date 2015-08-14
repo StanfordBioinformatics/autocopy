@@ -87,6 +87,7 @@ import sys
 import threading
 import time
 import traceback
+import requests
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
 from bin.rundir import RunDir
@@ -321,7 +322,7 @@ class Autocopy:
             raise OSError("Cant move run %s to %s. %s" % (rundirName,dest,e.message))
         if rundirObject:
             self.rundirs_monitored.remove(rundir)
-        lims_runinfo.set_flags_for_sequencing_failed()
+            lims_runinfo.set_flags_for_sequencing_failed() #may not be a flow cell, which is where scgpm_lims makes the status flag updates.
         self.send_email_rundir_aborted(rundirPath=rundirPath,dest_path=dest)
         
     def get_freespace(self, directory):
@@ -455,7 +456,9 @@ class Autocopy:
         for dirname in os.listdir(run_root):
             # Get directories, not files
             if (os.path.isdir(os.path.join(run_root, dirname))) and self.RUNDIR_REG.match(dirname):
-                rundirs_found_on_disk.append(self.get_or_create_rundir(run_root, dirname, remove=True))
+                rundir = self.get_or_create_rundir(run_root, dirname, remove=True)
+                if rundir:
+                    rundirs_found_on_disk.append(rundir)
         return rundirs_found_on_disk
 
     def get_or_create_rundir(self, run_root, dirname, remove=False):
@@ -473,12 +476,25 @@ class Autocopy:
 
             #Before creating the RunDir object, need to check UHTS to make sure it's not aborted or failed.
             #Note that the possible sequncing run statuses in UHTS are given in app/helpers/sequencing_run_status.rb in the RAILS app.
-            limsRunInfo = self.get_runinfo_from_lims(rundirName=dirname)
-            if limsRunInfo.has_status_sequencing_failed():
-                self.process_aborted_rundir(lims_runinfo=limsRunInfo,rundirPath=rundirPath)
-            
-            rundir = RunDir(run_root, dirname)
-            return rundir
+            print("Getting UHTS runinfo for run " + dirname)
+            try:
+                limsRunInfo = self.get_runinfo_from_lims(rundirName=dirname)
+            except requests.exceptions.HTTPError as e:
+                #perhaps run wasn't entered in UHTS yet.
+                limsRunInfo = False
+                response = e.response
+                status_code = response.status_code
+                if status_code == 404:
+                    print("Run " + dirname + " not found in UHTS; perhaps it just wasn't entered in yet. Skipping.")
+                    return None
+                else:
+                    raise(e)
+            if limsRunInfo:
+                if limsRunInfo.has_status_sequencing_failed():
+                    self.process_aborted_rundir(lims_runinfo=limsRunInfo,rundirPath=rundirPath)
+                else:
+                    rundir = RunDir(run_root, dirname)
+                    return rundir
 
     def are_files_missing(self, rundir):
         # Check that the run directory has all the right files.
@@ -493,6 +509,9 @@ class Autocopy:
         try:
             runinfo = RunInfo(conn=self.LIMS, run=rundirName)
         except Exception as e:
+            if e.__class__ == requests.exceptions.HTTPError:
+                raise e
+            print(str(e.__class__))
             self.log_lims_error(e)
             runinfo = None
         return runinfo
@@ -887,7 +906,8 @@ if __name__=='__main__':
         (no_lims, no_copy, no_email) = (True, True, True)
     else:
         (no_lims, no_copy, no_email) = (opts.no_lims, opts.no_copy, opts.no_email)
-
+    print("Starting Autocopy")
     autocopy = Autocopy(no_copy=no_copy, no_email=no_email, no_lims=no_lims, log_file=opts.log_file, 
                         config=config, test_mode_lims=opts.test_mode_lims)
+    print("Running")
     autocopy.run()
