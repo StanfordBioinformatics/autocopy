@@ -449,7 +449,7 @@ class Autocopy:
         # Send email warning and then forget them.
 #        for missing_rundir in self.rundirs_monitored:
 #            self.send_email_missing_rundir(missing_rundir)
-#        self.rundirs_monitored = new_rundirs_monitored
+        self.rundirs_monitored = new_rundirs_monitored
 
     def scan_for_rundirs(self, run_root):
         rundirs_found_on_disk = []
@@ -476,12 +476,10 @@ class Autocopy:
 
             #Before creating the RunDir object, need to check UHTS to make sure it's not aborted or failed.
             #Note that the possible sequncing run statuses in UHTS are given in app/helpers/sequencing_run_status.rb in the RAILS app.
-            print("Getting UHTS runinfo for run " + dirname)
             try:
                 limsRunInfo = self.get_runinfo_from_lims(rundirName=dirname)
             except requests.exceptions.HTTPError as e:
                 #perhaps run wasn't entered in UHTS yet.
-                limsRunInfo = False
                 response = e.response
                 status_code = response.status_code
                 if status_code == 404:
@@ -489,12 +487,12 @@ class Autocopy:
                     return None
                 else:
                     raise(e)
-            if limsRunInfo:
-                if limsRunInfo.has_status_sequencing_failed():
-                    self.process_aborted_rundir(lims_runinfo=limsRunInfo,rundirPath=rundirPath)
-                else:
-                    rundir = RunDir(run_root, dirname)
-                    return rundir
+            if limsRunInfo.has_status_sequencing_failed():
+                self.process_aborted_rundir(lims_runinfo=limsRunInfo,rundirPath=rundirPath)
+                return None
+            else:
+                rundir = RunDir(run_root, dirname)
+                return rundir
 
     def are_files_missing(self, rundir):
         # Check that the run directory has all the right files.
@@ -851,6 +849,9 @@ class Autocopy:
 
     def get_rundirs(self, run_root=None, dirname=None):
         rundirs = self.rundirs_monitored
+        print("In get_rundirs()")
+        print("rundirs_monitored is") 
+        print(rundirs)
         if dirname is not None:
             rundirs = filter(lambda rundir: rundir.get_dir() == dirname, rundirs)
         if run_root is not None:
