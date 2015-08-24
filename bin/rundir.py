@@ -46,6 +46,7 @@ class RunDir:
         "Base Calling Complete (Read 4)",
         "Base Calling Complete (Read 5)",
         "Base Calling Complete (Read 6)",
+        "RTA Complete"
         ]
 
     # Status constants
@@ -63,7 +64,8 @@ class RunDir:
      STATUS_BASECALLING_COMPLETE_READ3,
      STATUS_BASECALLING_COMPLETE_READ4,
      STATUS_BASECALLING_COMPLETE_READ5,
-     STATUS_BASECALLING_COMPLETE_READ6) = range(STATUS_MAX_INDEX)
+     STATUS_BASECALLING_COMPLETE_READ6,
+     STATUS_RTA_COMPLETE) = range(STATUS_MAX_INDEX)
 
     # Status files that the Illumina sequencers write out.
     STATUS_FILES= [
@@ -81,6 +83,7 @@ class RunDir:
         "Basecalling_Netcopy_complete_READ4.txt",
         "Basecalling_Netcopy_complete_READ5.txt",
         "Basecalling_Netcopy_complete_READ6.txt",
+        "RTAComplete.txt"
     ]
 
     #
@@ -517,53 +520,14 @@ class RunDir:
             else:
                 return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
             
-        elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_HISEQ:
+        elif self.get_platform() in [RunDir.PLATFORM_ILLUMINA_HISEQ,RunDir.PLATFORM_ILLUMINA_MISEQ]:
             sw_version = self.get_control_software_version_integer()
-            if sw_version == 1137:  # "1.1.37"
-                if self.get_reads() == 1:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_SINGLEREAD
-                else:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
-            elif sw_version >= 1308: # "1.3.8", "1.4.5", "1.4.8", "1.5.15"
-                if self.get_reads() == 1:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ1
-                elif self.get_reads() == 2:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
-                elif self.get_reads() == 3:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
-                elif self.get_reads() == 4:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
-                elif self.get_reads() == 5:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ5
-                elif self.get_reads() == 6:
-                    return status == RunDir.STATUS_BASECALLING_COMPLETE_READ6
-                else:
-                    print >> sys.stderr, "RunDir.is_finished(): %s: Unexpected number of reads: %d" % (self.get_dir(), self.get_reads())
-                    return False
-            else:
-                print >> sys.stderr, "RunDir.is_finished(): %s: HiSeq SW version %s unknown" % (self.get_dir(), sw_version)
-                return False
-
-        elif self.get_platform() == RunDir.PLATFORM_ILLUMINA_MISEQ:
-            if self.get_reads() == 1:
-                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ1
-            elif self.get_reads() == 2:
-                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
-            elif self.get_reads() == 3:
-                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ3
-            elif self.get_reads() == 4:
-                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ4
-            elif self.get_reads() == 5:
-                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ5
-            elif self.get_reads() == 6:
-                return status == RunDir.STATUS_BASECALLING_COMPLETE_READ6
-            else:
-                print >> sys.stderr, "RunDir.is_finished(): %s: Unexpected number of reads: %d" % (self.get_dir(), self.get_reads())
-                return False
+            return status == RunDir.STATUS_RTA_COMPLETE
 
         else:
             print >> sys.stderr, "RunDir.is_finished(): %s: Platform unknown" % (self.get_dir())
             return False
+
     def is_seq_finished(self):
         return self.is_finished()
 
