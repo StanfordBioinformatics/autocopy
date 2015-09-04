@@ -849,9 +849,6 @@ class Autocopy:
 
     def get_rundirs(self, run_root=None, dirname=None):
         rundirs = self.rundirs_monitored
-        print("In get_rundirs()")
-        print("rundirs_monitored is") 
-        print(rundirs)
         if dirname is not None:
             rundirs = filter(lambda rundir: rundir.get_dir() == dirname, rundirs)
         if run_root is not None:
