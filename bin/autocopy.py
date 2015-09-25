@@ -208,7 +208,7 @@ class Autocopy:
         """
  
         self.log_processing_dir(rundir)
-        lims_runinfo = self.get_runinfo_from_lims(rundirObject=rundir)
+        lims_runinfo = self.get_runinfo_from_lims(rundirObject=rundir) # A scgpm_lims.components.models.RunInfo object
 
         if self.is_rundir_aborted(lims_runinfo):
             if rundir.is_copying():
@@ -217,7 +217,7 @@ class Autocopy:
                 # so just go with it.
                 pass
             else:
-                self.process_aborted_rundir(rundir, lims_runinfo)
+                self.process_aborted_rundir(rundirObject=rundir, lims_runinfo=lims_runinfo)
 
         if rundir.is_copying():
             self.process_copying_rundir(rundir, lims_runinfo)
@@ -230,7 +230,12 @@ class Autocopy:
             self.process_ready_for_copy_rundir(rundir, lims_runinfo)
 
     def is_rundir_aborted(self, lims_runinfo):
-        if lims_runinfo is None:
+        """
+        Args  : lims_runinfo - a scgpm_lims.components.models.RunInfo object.
+        """
+        if lims_runinfo is None and self.LIMS: #then should have got something
+            return True
+        elif lims_runinfo is None and not self.LIMS:
             return False
         else:
             return lims_runinfo.has_status_sequencing_failed()
@@ -452,6 +457,9 @@ class Autocopy:
         self.rundirs_monitored = new_rundirs_monitored
 
     def scan_for_rundirs(self, run_root):
+        """
+        Returns : A list of rundir.RunDir objects.
+        """
         rundirs_found_on_disk = []
         for dirname in os.listdir(run_root):
             # Get directories, not files
@@ -500,6 +508,9 @@ class Autocopy:
         return files_missing
 
     def get_runinfo_from_lims(self, rundirObject=None,rundirName=None):
+        """
+        Returns : A scgpm_lims.components.models.RunInfo object
+        """
         if self.LIMS == None:
             return None
         if not rundirName:
@@ -839,6 +850,9 @@ class Autocopy:
         self.send_email_rundirs_monitored_summary()
 
     def get_rundir(self, run_root=None, dirname=None):
+        """
+        Function : Does the same as self.get_rundirs, but raises an Exception if more than one rundir.RunDir object is retrieved.
+        """
         rundirs = self.get_rundirs(run_root=run_root, dirname=dirname)
         if len(rundirs) == 0:
             return None
@@ -848,6 +862,13 @@ class Autocopy:
         return rundirs[0]
 
     def get_rundirs(self, run_root=None, dirname=None):
+        """
+        Function : Looks through the list of monitored rundir.RunDir objects, and
+                   1) If dirname only is specified, returns the rundir.RunDir object with a matching directory name,
+                   2) If run_root only is specified, returns all rundir.RunDir objects within the run_root path,
+                   3) If both run_root and dirname are specified, returns the rundir.RunDir objects whose directory
+                      name matches dirname AND exists within run_root.
+        """
         rundirs = self.rundirs_monitored
         if dirname is not None:
             rundirs = filter(lambda rundir: rundir.get_dir() == dirname, rundirs)
