@@ -233,10 +233,13 @@ class Autocopy:
         """
         Args  : lims_runinfo - a scgpm_lims.components.models.RunInfo object.
         """
-        if lims_runinfo is None and self.LIMS: #then should have got something
-            return True
+        if lims_runinfo is None and self.LIMS: 
+            return False #It could just be that the techs are late entering the run in the LIMS.
+                         # lims_runinfo can be None (see get_or_create_rundir()) if the HTTP call returns a 404.
+                         # In such a case, we'll let autocopy still monitor it. It just won't be copied to its final
+                         # destination until its entered in UHTS.
         elif lims_runinfo is None and not self.LIMS:
-            return False
+            return True
         else:
             return lims_runinfo.has_status_sequencing_failed()
 
