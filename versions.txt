@@ -1,0 +1,4 @@
+4.2.1
+-Fixed incorrect call to process_aborted_rundir() in process_rundir(). The
+arguments were passed positionally incorrectly and didn't match the correct
+parameters.
