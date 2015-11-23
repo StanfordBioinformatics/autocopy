@@ -329,7 +329,7 @@ class Autocopy:
         except OSError as e:
             raise OSError("Cant move run %s to %s. %s" % (rundirName,dest,e.message))
         if rundirObject:
-            self.rundirs_monitored.remove(rundir)
+            self.rundirs_monitored.remove(rundirObject)
             lims_runinfo.set_flags_for_sequencing_failed() #may not be a flow cell, which is where scgpm_lims makes the status flag updates.
         self.send_email_rundir_aborted(rundirPath=rundirPath,dest_path=dest)
         
