@@ -882,7 +882,7 @@ class RunDir:
     # calculating it if necessary.
     def get_platform(self):
 
-        if self.platform in (None, Rundir.PLATFORM_UNKNOWN)
+        if self.platform in (None, Rundir.PLATFORM_UNKNOWN):
 
             # Platform is HiSeq if file "runParameters.xml" has an
             # entry <RunParameters><Setup><ApplicationName> which
