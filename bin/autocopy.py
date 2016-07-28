@@ -8,7 +8,7 @@
 # autocopy.py -h for help
 #
 # AUTHORS:
-#   Keith Bettinger, Nathan Hammond, Nathaniel Watson
+#   Keith Bettinger, Nathan Hammond, Nathaniel Watson, Paul Billing-Ross
 #
 ###############################################################################
 
@@ -91,6 +91,7 @@ import email.mime.text
 from optparse import OptionParser
 
 import dxpy
+import fnmatch
 from distutils.version import StrictVersion
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
@@ -104,11 +105,24 @@ class ValidationError(Exception):
 
 class DNAnexusUpload:
 
-    def __init__(self, rundir):
+    def __init__(self, rundir, tar_dir, LOG_FILE, initiate_analysis_script, lims_url, 
+                 lims_token, test, upload_mode, viewers, contributors, release):
         self.rundir = rundir            # RunDir object
+        self.tar_dir = tar_dir
         self.LOG_FILE = LOG_FILE
+        self.initiate_analysis_script = initiate_analysis_script
+        self.lims_url = lims_url
+        self.lims_token = lims_token
+        self.test = test
+        self.upload_mode = upload_mode  # ['API', 'UploadAgent']
+        self.viewers = viewers
+        self.contributors = contributors
+	self.release = release
+
+        self.project_dxid = None
         self.interop_tar = None
         self.metadata_tar = None
+	#self.thumbnails_tar = None
         self.lane_tar_files = None
         self.rta_version = None
         self.file_dxids = {}
@@ -119,27 +133,33 @@ class DNAnexusUpload:
 
         # Tar interop and metadata files
         self.interop_tar = self.tar_interop_dir()
-        self.metadata_tar = self.tar_metadata()
+	#self.thumbnails_tar = self.tar_thumbnails_dir()
 
-        # Tar lane files
+        # Tar metadata files
         print 'RTA version is: %s' % self.rta_version
         if StrictVersion(self.rta_version) < StrictVersion('2.0.0'):
             print 'Tarring files according to RTA v1 pattern'
-            self.metadata_tar = self.tar_rta_v1_metadata(self.rundir)
-            self.lane_tar_files = self.tar_rta_v1_rundir(self.rundir)
+            self.metadata_tar = self.tar_rta_v1_metadata()
         elif StrictVersion(self.rta_version) >= StrictVersion('2.0.0'):
             print 'Tarring files according to RTA v2 pattern'
-            self.metadata_tar = self.tar_rta_v2_metadata(self.rundir)
-            self.lane_tar_files = self.tar_rta_v2_rundir(self.rundir)
+            self.metadata_tar = self.tar_rta_v2_metadata()
+        self.lane_paths = self.get_lane_paths()  # self.lane_tar_files["L001"] = lane_dir_path
 
-        # Upload files
-        for lane_index in self.lane_tar_files:
-            lane_tar = self.lane_tar_files[lane_index]
+        # Tars all lanes before uploading files
+        for lane_name in self.lane_paths:
+            lane_index = int(lane_name[-1:])
+            if StrictVersion(self.rta_version) < StrictVersion('2.0.0'):
+                lane_tar = self.tar_rta_v1_lane_path(lane_name, lane_index)
+            elif StrictVersion(self.rta_version) >= StrictVersion('2.0.0'):
+                lane_tar = self.tar_rta_v2_lane_path(lane_name, lane_index)
+
+            self.project_dxid = self.get_dnanexus_project(lane_index)
             dxids = self.upload_lane(lane_index=lane_index, lane_tar=lane_tar)
-            self.file_dxids[lane_index] = ids
+            self.file_dxids[lane_index] = dxids
+            self.initiate_analysis(lane_index)
 
     def get_rta_version(self):
-        params_file = os.path.join(rundir.get_path(), 'runParameters.xml')
+        params_file = os.path.join(self.rundir.get_path(), 'runParameters.xml')
         with open(params_file, 'r') as PARAM:
             for line in PARAM:
                 match = re.search(r'<RTAVersion>([\d\.]+)</RTAVersion>', line)
@@ -148,153 +168,318 @@ class DNAnexusUpload:
                     break
         return rta_version
 
+    def tar_thumbnails_dir(self):
+        ''' Description: tar and upload InterOp directory to lane DNAnexus project
+        '''
+        tar_name = '%s.Thumbnail_Images.tar' % self.rundir.get_dir()
+        tar_path = os.path.join(self.tar_dir, tar_name)
+        
+        if os.path.isfile(tar_path):
+            return tar_path
+
+        thumbnails_tar_list = ['tar', '-C', self.rundir.get_path(), 
+                                '-cf', tar_path, 'Thumbnail_Images'
+                            ]
+        thumbnails_tar_proc = subprocess.call(thumbnails_tar_list, stdout=self.LOG_FILE, 
+                                            stderr=self.LOG_FILE
+                       )
+        # Check that InterOp tar file exists
+        return tar_path
+        
     def tar_interop_dir(self):
         ''' Description: tar and upload InterOp directory to lane DNAnexus project
         '''
-        tar_name = '%s.InterOp.tar.gz' % self.rundir.get_dir()
-        #interop_tar = os.path.join(self.rundir.get_path(), 'InterOp.tar.gz')
+        tar_name = '%s.InterOp.tar' % self.rundir.get_dir()
+        tar_path = os.path.join(self.tar_dir, tar_name)
         
-        if os.path.isfile(interop_tar):
-            return interop_tar
+        if os.path.isfile(tar_path):
+            return tar_path
 
         interop_tar_list = ['tar', '-C', self.rundir.get_path(), 
-                                '-czvf', interop_tar, 'InterOp'
+                                '-cvf', tar_path, 'InterOp', 'runParameters.xml', 'RunInfo.xml'
                             ]
-        interop_tar_proc = subprocess.Popen(interop_tar_list, stdout=self.LOG_FILE, 
+        interop_tar_proc = subprocess.call(interop_tar_list, stdout=self.LOG_FILE, 
                                             stderr=self.LOG_FILE
+                       )
         # Check that InterOp tar file exists
-        return interop_tar
+        return tar_path
 
     def tar_rta_v2_metadata(self):
         ''' DEV: Change this to mirror formatting of tar_rta_v1_metadata method and specify files/dirs
         Description:
         '''
 
-        tar_name = '%s.metadata.tar.gz' % self.rundir.get_dir() # get_dir() = basename/run name
-        #metadata_tar = os.path.join(self.rundir.get_path(), tar_name)
-        metadata_tar = tar_name
+        tar_name = '%s.metadata.tar' % self.rundir.get_dir() # get_dir() = basename/run name
+        tar_path = os.path.join(self.tar_dir, tar_name)
 
-        if os.path.isfile(metadata_tar):
-                return metadata_tar
+        if os.path.isfile(tar_path):
+                return tar_path
 
         meta_tar_list = ['tar', '-C', '%s' % self.rundir.get_path(),
-                         '--exclude', './Data/Intensities/BaseCalls',
-                         '--exclude', './Data/Intensities/L*',
-                         '--exclude', './Images',
-                         '--exclude', './Logs',
-                         '-czvf', '%s' % metadata_tar,
-                         '.'
-                        ]
-
-        meta_tar_proc = subprocess.Popen(meta_tar_list, stdout=self.LOG_FILE,
+                         '-cvf', '%s' % tar_path,
+                         'runParameters.xml', 'RunInfo.xml', 'RTAConfiguration.xml',
+                         'RTALogs',
+                         'RTAComplete.txt',
+                         'Recipe', 'Config',
+             		 'Data/Intensities/s.locs'
+           	 	]
+        
+        meta_tar_proc = subprocess.call(meta_tar_list, stdout=self.LOG_FILE,
                                          stderr=self.LOG_FILE)
-        return metadata_tar
+        return tar_path
 
     def tar_rta_v1_metadata(self):
         ''' Description:
         '''
 
-        tar_name = '%s.metadata.tar.gz' % self.rundir.get_dir() # get_dir() = basename/run name
-        #metadata_tar = os.path.join(self.rundir.get_path(), tar_name)
-        metadata_tar = tar_name
+        tar_name = '%s.metadata.tar' % self.rundir.get_dir() # get_dir() = basename/run name
+        tar_path = os.path.join(self.tar_dir, tar_name)
 
-        if os.path.isfile(metadata_tar):
-                return metadata_tar
+        if os.path.isfile(tar_path):
+                return tar_path
 
-        mata_tar_list = ['tar', '-C', '%s' % self.rundir.get_path(),
-                         '-czvf', '%s' % metadata_tar,
+        meta_tar_list = ['tar', '-C', '%s' % self.rundir.get_path(),
+                         '-cvf', '%s' % tar_path,
                          'runParameters.xml', 'RunInfo.xml',
-                         'Data/RTALogs', 'Data/Intensitites/config.xml', 'Data/Intensities/BaseCalls/config.xml',
+                         'Data/RTALogs', 'Data/Intensities/config.xml', 'Data/Intensities/BaseCalls/config.xml',
                          'RTAComplete.txt',
-                         'Data/Intensities/RTAConfiguration.xml', 'Data/Intensitites/config.xml',
+                         'Data/Intensities/RTAConfiguration.xml', 'Data/Intensities/config.xml',
                          'Data/Intensities/Offsets',
-                         'Basecalling_Netcopy_complete_*', 'ImageAnalysis_Netcopy_complete_*',
                          'Recipe', 'Config']
 
-        meta_tar_proc = subprocess.Popen(meta_tar_list, stdout=self.LOG_FILE,
+        meta_tar_proc = subprocess.call(meta_tar_list, stdout=self.LOG_FILE,
                                          stderr=self.LOG_FILE)
-        return metadata_tar
+        return tar_path
     
-    def tar_rta_v1_rundir(self, rundir):
-        ''' Description: Need to tar the lane directory in Data/Intensities/L00N as well as in
+    def get_lane_paths(self):
+
+        lane_paths = {}
+        basecalls_dir = os.path.join(self.rundir.get_path(), 'Data', 'Intensities', 'BaseCalls')
+
+        for filename in os.listdir(basecalls_dir):
+            if fnmatch.fnmatch(filename, 'L0*'):
+                lane_name = filename
+                lane_path = os.path.join(self.rundir.get_path(), lane_name)
+                lane_paths[lane_name] = lane_path
+        return lane_paths
+
+    def tar_rta_v1_lane_path(self, lane_name, lane_index):
+
+
+        tar_name = '%s_L%d.tar' % (self.rundir.get_dir(), lane_index)
+        tar_path = os.path.join(self.tar_dir, tar_name)
+        if os.path.isfile(tar_path):
+            pass
+        else:
+            intens_rel_path = os.path.join('Data', 'Intensities', lane_name)
+            basecall_rel_path = os.path.join('Data', 'Intensities', 'BaseCalls', lane_name)
+            lane_tar_list = ['tar', '-C', self.rundir.get_path(),
+                             '-cf', tar_path, intens_rel_path, basecall_rel_path
+                            ]
+            lane_tar_proc = subprocess.call(lane_tar_list, stdout=self.LOG_FILE,
+                                                         stderr=self.LOG_FILE)
+        return tar_path
+
+    def tar_rta_v2_lane_path(self, lane_name, lane_index):
+
+        tar_name = '%s_L%d.tar' % (self.rundir.get_dir(), lane_index)
+        tar_path = os.path.join(self.tar_dir, tar_name)
+        if os.path.isfile(tar_path):
+                pass
+        else :
+                basecall_rel_path = os.path.join('Data', 'Intensities', 'BaseCalls', lane_name)
+                lane_tar_list = ['tar', '-C', self.rundir.get_path(),
+                                 '-cf', tar_path, basecall_rel_path
+                                ]
+                lane_tar_proc = subprocess.call(lane_tar_list, stdout=self.LOG_FILE,
+                                                 stderr=self.LOG_FILE)
+        return tar_path
+
+    '''
+    def tar_rta_v1_rundir(self):
+         Description: DEPRECATED. Need to tar the lane directory in Data/Intensities/L00N as well as in
             Data/Intensities/BaseCalls/L00N.
-        '''
+        
 
         lane_tar_files = {}
-        basecalls_dir = os.path.join(rundir.get_path(), 'Data', 'Intensities', 'BaseCalls')
+        basecalls_dir = os.path.join(self.rundir.get_path(), 'Data', 'Intensities', 'BaseCalls')
 
         for filename in os.listdir(basecalls_dir):
             if fnmatch.fnmatch(filename, 'L0*'):
                 lane_name = filename
                 lane_index = int(filename[-1:])
-                tar_name = '%s_L%d.tar.gz' % (rundir.get_dir(), lane_index)
-                # lane_tar = os.path.join(self.rundir.get_path(), tar_name)
-                lane_tar = tar_name
+                tar_name = '%s_L%d.tar.gz' % (self.rundir.get_dir(), lane_index)
+                tar_path = os.path.join(self.tar_dir, tar_name)
                 # Check if tarball already exists. If not, create it.
-                if os.path.isfile(lane_tar):
-                        lane_tar_files[lane_index] = lane_tar
+                if os.path.isfile(tar_path):
+                        lane_tar_files[lane_index] = tar_path
                 else:
                         intens_rel_path = os.path.join('Data', 'Intensities', lane_name)
                         basecall_rel_path = os.path.join('Data', 'Intensities', 'BaseCalls', lane_name)
-                        lane_tar_list = ['tar', '-C', rundir.get_path(),
-                                         '-czf', lane_tar, intens_rel_path, basecall_rel_path
+                        lane_tar_list = ['tar', '-C', self.rundir.get_path(),
+                                         '-czf', tar_path, intens_rel_path, basecall_rel_path
                                         ]
-                        lane_tar_proc = subprocess.Popen(lane_tar_list, stdout=self.LOG_FILE,
+                        lane_tar_proc = subprocess.call(lane_tar_list, stdout=self.LOG_FILE,
                                                          stderr=self.LOG_FILE)
-                        lane_tar_files[lane_index] = lane_tar
+                        lane_tar_files[lane_index] = tar_path
         return lane_tar_files
 
-    def tar_rta_v2_rundir(self, rundir):
-        ''' Description: With v2 Real Time Analysis (RTA) software, all of the lane files
+    def tar_rta_v2_rundir(self):
+         Description: DEPRECATED. With Real Time Analysis (RTA) version 2 software, all of the lane files
             have been aggregated into a single directory in Data/Intensities/BaseCalls/L00N
-        '''
+        
 
         lane_tar_files = {}
-        basecalls_dir = os.path.join(rundir.get_path(), 'Data', 'Intensities', 'BaseCalls')
+        basecalls_dir = os.path.join(self.rundir.get_path(), 'Data', 'Intensities', 'BaseCalls')
 
         for filename in os.listdir(basecalls_dir):
             if fnmatch.fnmatch(filename, 'L0*'):
                 lane_name = filename
-                lane_index = int(filename[-1:])
-                tar_name = '%s_L%d.tar.gz' % (rundir.get_dir(), lane_index)
-                #lane_tar = os.path.join(self.rundir.get_path(), tar_name)
-                lane_tar = tar_name
+                lane_index = int(lane_name[-1:])
+                tar_name = '%s_L%d.tar.gz' % (self.rundir.get_dir(), lane_index)
+                tar_path = os.path.join(self.tar_dir, tar_name)
                 # Check if tarball already exists. If not, create it.
-                if os.path.isfile(lane_tar):
-                        lane_tar_files[lane_index] = lane_tar
+                if os.path.isfile(tar_path):
+                        lane_tar_files[lane_index] = tar_path
                 else :
                         basecall_rel_path = os.path.join('Data', 'Intensities', 'BaseCalls', lane_name)
-                        lane_tar_list = ['tar', '-C', rundir.get_path(),
-                                         '-czf', lane_tar, basecall_rel_path
+            		s_locs_path = os.path.join('Data', 'Intensities', 's.locs')
+                        lane_tar_list = ['tar', '-C', self.rundir.get_path(),
+                                         '-czf', tar_path, basecall_rel_path, s_locs_path
                                         ]
-                        lane_tar_proc = subprocess.Popen(lane_tar_list, stdout=self.LOG_FILE,
+                        lane_tar_proc = subprocess.call(lane_tar_list, stdout=self.LOG_FILE,
                                                          stderr=self.LOG_FILE)
-                        lane_tar_files[lane_index] = lane_tar
+                        lane_tar_files[lane_index] = tar_path
         return lane_tar_files
+    '''
 
+    def upload_file(self, file_path, class_name, project_dxid, folder): 
+        upload_file_dxid = None
+        file_basename = os.path.basename(file_path)
+        file_glob_name = file_basename + '*'
+	print 'Info: Checking upload status of file: %s' % file_path
+        # Find any existing copies of this file on DNAnexus
+        dxfile_generator = dxpy.find_data_objects(classname = class_name, 
+                                                  name = file_glob_name,
+                                                  name_mode = 'glob',
+                                                  project = project_dxid,
+                                                  folder = folder,
+                                                  properties = {'upload_complete': True}
+                                                 )
+
+        # Determine whether they are complete file based on 'upload_complete' boolean flag
+        dxfiles = list(dxfile_generator)
+        if len(dxfiles) == 0:
+            print 'Info: Did not find any existing %s files on DNAnexus' % file_basename
+        for dxfile_dict in dxfiles:
+            print 'Info: Found existing file %s on DNAnexus' % file_basename
+            dxfile = dxpy.DXFile(dxid=dxfile_dict['id'], project=dxfile_dict['project'])
+            properties = dxfile.get_properties()
+            if properties['upload_complete'] == 'false':
+                print 'Warning: Incomplete upload of file %s found; removing' % file_basename
+                dxfile.remove()
+            elif properties['upload_complete'] == 'true':
+                print 'Info: File %s completed upload; skipping upload' % file_basename
+                upload_file_dxid = dxfile.get_id()
+            else:
+                print 'Error: Unable to determine upload status of %s' % file_basename
+                sys.exit()
+        # If complete copy of file does not exist on DNAnexus, upload it
+        
+        if not upload_file_dxid:
+            if self.upload_mode == 'API':
+                print 'Uploading file %s to DNAnexus' % file_basename
+                upload_file_dxfile = dxpy.upload_local_file(filename = file_path,
+                                                    	    project = project_dxid,
+                                                	    folder = folder,
+                                            		    properties = {'upload_complete': 'false'},
+                                            		    parents = True
+                                               		   )
+      		upload_file_dxid = upload_file_dxfile.get_id()
+           	upload_file_dxfile.set_properties(properties = {'upload_complete': 'true'})
+            
+            elif self.upload_mode == 'UploadAgent':
+		log_file = '/seqctr/Runs/DNAnexus_Logs/%s.ua.log' % file_basename
+
+                command = 'ua-1.5.13 '
+                command += '--auth-token pdt7ZQNjMKL6fgf56gGV8JbhUpjaRmlx '
+                command += '--project %s ' % project_dxid
+                command += '--folder /raw_data '
+                command += '--progress '                # output progress to stderr
+                command += '--read-threads 2 '          # default == 2
+                #command += '--compress-threads 8 '       # default == 1
+                command += '--upload-threads 200 '        # default == 8
+                command += '--chunk-size 40M '          # default == 75M
+                command += '--do-not-compress '
+		command += '--no-round-robin-dns '
+		command += '%s '	% file_path 
+                command += '&> %s' % log_file
+
+                self.createSubprocess(cmd=command)
+		upload_file_dxid = None
+		with open(log_file, 'r') as LOG:
+			for line in LOG:
+				match = re.search(r'(^file-\w+)', line)
+				if match:
+					upload_file_dxid = match.group(1)
+					break
+                		else:
+					pass
+		if upload_file_dxid == None:
+			print 'Error: Could not determine file dxid from log: %s' % log_file
+			sys.exit()
+		else:
+			upload_file_dxfile = dxpy.DXFile(dxid=upload_file_dxid, project=project_dxid)
+			upload_file_dxfile.set_properties(properties = {'upload_complete': 'true'})
+        return upload_file_dxid
+    
     def upload_lane(self, lane_index, lane_tar):
-        project_dxid = self.make_dnanexus_project(lane_index=lane_index, contains_phi=False)
+        interop_dxid = self.upload_file(file_path = self.interop_tar,
+                                        class_name = 'file', 
+                                        project_dxid = self.project_dxid, 
+                                        folder = '/raw_data')
+	''' Thumbnails live and die on NetApp.
+	if int(lane_index) == 9: # Turned off for now
+        	thumbnails_dxid = self.upload_file(file_path = self.thumbnails_tar,
+                                        	   class_name = 'file', 
+                                        	   project_dxid = self.project_dxid, 
+                                        	   folder = '/raw_data')
+	'''
+        metadata_dxid = self.upload_file(file_path = self.metadata_tar, 
+                                         class_name = 'file', 
+                                         project_dxid = self.project_dxid, 
+                                         folder = '/raw_data')
+        lane_dxid = self.upload_file(file_path = lane_tar, 
+                                     class_name = 'file',
+                                     project_dxid = self.project_dxid, 
+                                     folder='/raw_data')
+        return [interop_dxid, metadata_dxid, lane_dxid]
 
-        interop_dxfile = dxpy.upload_local_file(filename=self.interop_tar, project=project_dxid, folder='/')
-        metadata_dxfile = dxpy.upload_local_file(filename=self.metadata_tar, project=project_dxid, folder='/')
-        lane_dxfile = dxpy.upload_local_file(filename=lane_tar, project=project_dxid, folder='/')
-        return [interop_dxfile.get_id(), metadata_dxfile.get_id(), lane_dxfile.get_id()]
-
-    def make_dnanexus_project(self, lane_index, contains_phi=False):
-        project_name = '%s_L%d' % (self.rundir, lane_index)
+    def get_dnanexus_project(self, lane_index, contains_phi=False):
+        project_name = '%s_L%d' % (self.rundir.get_dir(), lane_index)
 
         # Check whether project already exists
         project_generator = dxpy.find_projects(name=project_name, name_mode='exact')
         projects = list(project_generator)
         if len(projects) == 1:
+            # Find existing DNAnexus project
             project = projects[0]
             project_dxid = project['id']
         elif len(projects) == 0:
             # Create new DNAnexus project
             input_params = {'name': project_name,
-                              'containsPHI': contains_phi,
+                            'containsPHI': contains_phi,
                            }
-            project_dxid = dxpy.api.project_new(input_params=input_params)
+            project_dxid = dxpy.api.project_new(input_params=input_params)['id']
+            # Add project viewers & contributors
+            for viewer in self.viewers:
+                user_id = 'user-%s' % viewer
+                input_params = {'invitee': user_id, 'level': 'VIEW'}
+                dxpy.api.project_invite(object_id=project_dxid, input_params=input_params)
+            for contributor in self.contributors:
+                user_id = 'user-%s' % contributor
+                input_params = {'invitee': user_id, 'level': 'CONTRIBUTE'}
+                dxpy.api.project_invite(object_id=project_dxid, input_params=input_params)
         elif len(projects) > 1:
             # DEV: Change to STDERR message
             print('Warning: multiple DNAnexus projects matching name ' + 
@@ -308,18 +493,75 @@ class DNAnexusUpload:
             sys.exit()
         return project_dxid
 
+    def initiate_analysis(self, lane_index):
+        # Initiate analysis
+        print 'Info: Initiating analysis for %s L%d' % (self.rundir.get_dir(), int(lane_index))
+        # List must contain only strings
+        analysis_list = [self.initiate_analysis_script, 
+                 '-n', self.rundir.get_dir(),
+                 '-l', str(lane_index),
+                 '-p', self.project_dxid,
+                 '-r', self.rta_version,
+                 '-u', self.lims_url,
+                 '-o', self.lims_token,
+                 '-t', str(self.test)
+                ]
+	if self.release:
+		analysis_list.append('-e')
+        print analysis_list
+        analysis_proc = subprocess.Popen(analysis_list, stdout=self.LOG_FILE, stderr=self.LOG_FILE) 
+
+    def createSubprocess(self, cmd, pipeStdout=False, checkRetcode=True):
+        """
+        Function: Creates a subprocess via a call to subprocess.Popen with the argument 
+                  'shell=True', and pipes stdout and stderr. Stderr is always  piped, but 
+                  stdout can be turned off. If the argument checkRetcode is True, which 
+                  it is by default, then for any non-zero return code, an Exception is
+                  raised that will print out the the command, stdout, stderr, and the 
+                  returncode when not caught. Otherwise, the Popen instance will be 
+                  return, in which case the caller must call the instance's communicate()
+                  method (and not it's wait() method!) in order to get the return code to 
+                  see if the command was a success. communicate() will return a tuple 
+                  containing (stdout, stderr). But at that point, you can then check 
+                  the return code with Popen instance's 'returncode' attribute.
+        Args    : cmd (str): Command line argument for the subprocess wrapped in the 
+                    subprocess.Popen instance. Will be printed to stdout when 
+                    there is an error in the subprocess.
+                  pipeStdout (bool): If 'True' pipe stdout of the subprocess.
+                  checkRetcode (bool): See documentation above.
+        Returns : A two-item tuple containing stdout and stderr, respectively.
+        """
+        stdout = None
+        if pipeStdout:
+            stdout = subprocess.PIPE
+            stderr = subprocess.PIPE
+        popen = subprocess.Popen(cmd,shell=True,stdout=stdout,stderr=subprocess.PIPE)
+        if checkRetcode:
+            stdout,stderr = popen.communicate()
+            if not stdout: #will be None if not piped
+                stdout = ""
+            stdout = stdout.strip()
+            stderr = stderr.strip()
+            retcode = popen.returncode
+            if retcode:
+                #below, I'd like to raise a subprocess.SubprocessError, but that doens't exist until Python 3.3.
+                raise Exception("subprocess command '{cmd}' failed with returncode '{returncode}'.\n\nstdout is: '{stdout}'.\n\nstderr is: '{stderr}'.".format(cmd=cmd,returncode=retcode,stdout=stdout,stderr=stderr))
+            return stdout,stderr
+        else:
+            return popen
+
 class Autocopy:
 
     RUNDIR_REG = re.compile(r'^\d{6}_')
 
     LOG_DIR_DEFAULT = '/var/log'
 
-    SUBDIR_COMPLETED = "Runs_Completed" # Runs are moved here after copy
-    SUBDIR_ABORTED = "Runs_Aborted" # Runs are moved here if flagged 'sequencing_failed'
+    SUBDIR_COMPLETED = "DNAnexus_Runs_Completed" # Runs are moved here after copy
+    SUBDIR_ABORTED = "DNAnexus_Runs_Aborted" # Runs are moved here if flagged 'sequencing_failed'
 
     LIMS_API_VERSION = 'v1'
 
-    MAX_COPY_PROCESSES = 2 # Cap the number of copy procs
+    MAX_COPY_PROCESSES = 1 # Cap the number of copy procs
                            # if --no_copy, this is set to 0.
     EMAIL_TO = None
     EMAIL_FROM = None
@@ -359,7 +601,14 @@ class Autocopy:
     COPY_PROCESS_EXEC_FILENAME = "copy_rundir.py"
     COPY_PROCESS_EXEC_COMMAND = os.path.join(os.path.dirname(__file__), COPY_PROCESS_EXEC_FILENAME)
 
-    def __init__(self, log_file=None, no_copy=False, no_lims=False, no_email=False, test_mode_lims=False, config=None, errors_to_terminal=False, dnanexus=False):
+    def __init__(self, log_file=None, no_copy=False, no_lims=False, no_email=False, 
+                 test_mode_lims=False, config=None, errors_to_terminal=False, 
+                 dnanexus=False, upload_mode=None, release=False):
+
+        self.dnanexus = dnanexus        # Boolean flag
+        self.upload_mode = upload_mode  # ['API', 'UploadAgent']
+	self.release = release
+
         self.initialize_config(config)
         self.initialize_log_file(log_file)
         self.log_starting_autocopy_message()
@@ -370,6 +619,7 @@ class Autocopy:
         self.initialize_run_roots()
         self.initialize_signals()
         self.redirect_stdout_stderr_to_log(errors_to_terminal)
+
 
     def cleanup(self):
         try:
@@ -418,6 +668,8 @@ class Autocopy:
         """
  
         self.log_processing_dir(rundir)
+	print "Info: Current status = %s" % rundir.get_status()
+	print "Info: Current status string = %s" % rundir.get_status_string()	
         lims_runinfo = self.get_runinfo_from_lims(rundirObject=rundir) # A scgpm_lims.components.models.RunInfo object
 
         if self.is_rundir_aborted(lims_runinfo):
@@ -425,12 +677,15 @@ class Autocopy:
                 # Ignore "sequencing failed" flag after copy started.
                 # No mechanism to clean up on the other end of the copy,
                 # so just go with it.
+		print "Info: %s is still copying. Skipping." % rundir.get_dir() 
                 pass
             else:
                 self.process_aborted_rundir(rundirObject=rundir, lims_runinfo=lims_runinfo)
 
+
         if rundir.is_copying():
             self.process_copying_rundir(rundir, lims_runinfo)
+            print "Info: %s is still copying. Skipping." % rundir.get_dir()
 
         # process_ready_for_copy_rundir goes after process_copying_rundir
         # because when a copy process fails, process_copying_rundir resets
@@ -472,9 +727,10 @@ class Autocopy:
         if not lims_runinfo:
             self.send_email_run_not_found_in_lims(rundir.get_dir())
         self.log_start_copy(rundir)
-        self.start_copy(rundir)
-        if lims_runinfo:
-            lims_runinfo.set_flags_for_sequencing_finished_analysis_started()
+        self.start_copy(rundir, dnanexus=self.dnanexus)
+        #if lims_runinfo:
+        # Commented out for testing
+            #lims_runinfo.set_flags_for_sequencing_finished_analysis_started()
 
     def process_copying_rundir(self, rundir, lims_runinfo):
         # Check if the copy process finished successfully
@@ -490,7 +746,7 @@ class Autocopy:
 
     def restart_copy(self, rundir):
         rundir.kill_copy_process()
-        self.start_copy(rundir)
+        self.start_copy(rundir, dnanexus=self.dnanexus)
 
     def process_failed_copy_rundir(self,rundir,retcode):
         """
@@ -540,7 +796,8 @@ class Autocopy:
             raise OSError("Cant move run %s to %s. %s" % (rundirName,dest,e.message))
         if rundirObject:
             self.rundirs_monitored.remove(rundirObject)
-            lims_runinfo.set_flags_for_sequencing_failed() #may not be a flow cell, which is where scgpm_lims makes the status flag updates.
+        # Commented out for testing
+            # lims_runinfo.set_flags_for_sequencing_failed() #may not be a flow cell, which is where scgpm_lims makes the status flag updates.
         self.send_email_rundir_aborted(rundirPath=rundirPath,dest_path=dest)
         
     def get_freespace(self, directory):
@@ -698,7 +955,12 @@ class Autocopy:
             #Before creating the RunDir object, need to check UHTS to make sure it's not aborted or failed.
             #Note that the possible sequncing run statuses in UHTS are given in app/helpers/sequencing_run_status.rb in the RAILS app.
             try:
-                limsRunInfo = self.get_runinfo_from_lims(rundirName=dirname)
+        	print >> self.LOG_FILE, 'Getting LIMS RunInfo for %s\n' % dirname
+        	self.LOG_FILE.flush()                
+        	limsRunInfo = self.get_runinfo_from_lims(rundirName=dirname)
+                if limsRunInfo == None:
+                    print("Run " + dirname + " not found in UHTS; perhaps it just wasn't entered in yet. Skipping.")
+                    return None
             except requests.exceptions.HTTPError as e:
                 #perhaps run wasn't entered in UHTS yet.
                 response = e.response
@@ -708,6 +970,7 @@ class Autocopy:
                     return None
                 else:
                     raise(e)
+
             if limsRunInfo.has_status_sequencing_failed():
                 self.process_aborted_rundir(lims_runinfo=limsRunInfo,rundirPath=rundirPath)
                 return None
@@ -731,6 +994,8 @@ class Autocopy:
         try:
             runinfo = RunInfo(conn=self.LIMS, run=rundirName)
         except Exception as e:
+            print >> self.LOG_FILE, 'Error when getting LIMS RunInfo: %s' % e
+            self.LOG_FILE.flush()
             if e.__class__ == requests.exceptions.HTTPError:
                 raise e
             print(str(e.__class__))
@@ -764,12 +1029,28 @@ class Autocopy:
                 problems_found.append('Mismatched value "%s". Value in run directory: "%s". Value in LIMS: "%s"' % (field, rundirval, limsval))
         return problems_found
 
-    def start_copy(self, rundir, rsync=True, dnanexus=False):
+    def start_copy(self, rundir, dnanexus, rsync=True):
         if dnanexus == True:
             self.log_start_dnanexus_upload(rundir)
-            dnanexus_upload = DNAnexusUpload(rundir=rundir)
+            #try:
+            dnanexus_upload = DNAnexusUpload(rundir = rundir, 
+                                                 tar_dir = self.COPY_SOURCE_RUN_TARS, 
+                                                 LOG_FILE = self.LOG_FILE,
+                                                 initiate_analysis_script = self.INITIATE_ANALYSIS_SCRIPT, 
+                                                 lims_url = self.UHTS_LIMS_URL,
+                                                 lims_token = self.UHTS_LIMS_TOKEN,
+                                                 test = False,
+                                                 upload_mode = self.upload_mode,
+                                                 viewers = self.VIEWERS,
+                                                 contributors = self.CONTRIBUTORS,
+						 release = self.release
+                                                )
             dnanexus_upload.run()
-
+            #lims_runinfo = self.get_runinfo_from_lims(rundirObject=rundir) 
+            #self.process_completed_rundir(rundir, lims_runinfo)
+            #except:
+            #lims_runinfo = self.get_runinfo_from_lims(rundirObject=rundir)
+            #self.process_aborted_rundir(lims_runinfo=lims_runinfo,rundirObject=rundir)
         else:
             source = rundir.get_path().rstrip('/')
             dest = self.COPY_DEST_RUN_ROOT.rstrip('/')
@@ -801,7 +1082,7 @@ class Autocopy:
         email_body = "The Autocopy Daemon received a kill signal and is shutting down.\n\n"
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
-    def send_email_rundir_aborted(self, rundirPath,dest_path):
+    def send_email_rundir_aborted(self, rundirPath, dest_path):
         rundirName = os.path.basename(rundirPath)
         email_subj = "Run Directory Aborted: %s" % rundirName
         email_body = "The following run was flagged as 'sequencing failed' in the LIMS:\n\n"
@@ -1020,6 +1301,7 @@ class Autocopy:
             'COPY_DEST_GROUP': validate_cmdline_safe_str,
             'COPY_DEST_RUN_ROOT': validate_cmdline_safe_str,
             'COPY_SOURCE_RUN_ROOTS': validate_list,
+        'COPY_SOURCE_RUN_TARS': validate_str,
             'MIN_FREE_SPACE': validate_int,
             'MAIN_LOOP_DELAY_SECONDS': validate_int,
             'RUNROOT_FREESPACE_CHECK_DELAY_SECONDS': validate_int,
@@ -1030,6 +1312,10 @@ class Autocopy:
             'AUTOCOPY_SMTP_TOKEN': validate_str,
             'AUTOCOPY_SMTP_PORT': validate_int,
             'AUTOCOPY_SMTP_SERVER': validate_str,
+            'INITIATE_ANALYSIS_SCRIPT': validate_str,
+            'UPLOAD_AGENT': validate_str,
+            'VIEWERS': validate_list,
+            'CONTRIBUTORS': validate_list
         }
 
         for key in config.keys():
@@ -1128,7 +1414,10 @@ class Autocopy:
         parser.add_option("-x", "--dnanexus", dest="dnanexus", action="store_true",
                           default=False, 
                           help="Upload runs to DNAnexus instead of SCG")
-
+        parser.add_option("-u", "--upload_mode", dest="upload_mode", type="string",
+                          default='UploadAgent', help="Specify how to upload files to DNAnexus ['API', 'UploadAgent']")
+	parser.add_option("-r", "--release", dest="release", action="store_true", default=False,
+			  help='Specify whether to automatically release DNAnexus projects to user')
         (opts, args) = parser.parse_args()
         return (opts, args)
 
@@ -1151,8 +1440,14 @@ if __name__=='__main__':
     else:
         (no_lims, no_copy, no_email) = (opts.no_lims, opts.no_copy, opts.no_email)
     print("Starting Autocopy")
-    autocopy = Autocopy(no_copy=no_copy, no_email=no_email, no_lims=no_lims, 
-                        log_file=opts.log_file, config=config, 
-                        test_mode_lims=opts.test_mode_lims, dnanexus=dnanexus)
+    autocopy = Autocopy(no_copy = no_copy, 
+                        no_email = no_email, 
+                        no_lims = no_lims, 
+                        log_file = opts.log_file, 
+                        config = config, 
+                        test_mode_lims = opts.test_mode_lims, 
+                        dnanexus = opts.dnanexus,
+                        upload_mode = opts.upload_mode,
+			release = opts.release)
     print("Running")
     autocopy.run()
