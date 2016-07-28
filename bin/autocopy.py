@@ -106,7 +106,7 @@ class ValidationError(Exception):
 class DNAnexusUpload:
 
     def __init__(self, rundir, tar_dir, LOG_FILE, initiate_analysis_script, lims_url, 
-                 lims_token, test, upload_mode, viewers, contributors, release):
+                 lims_token, test, upload_mode, viewers, contributors, release, develop):
         self.rundir = rundir            # RunDir object
         self.tar_dir = tar_dir
         self.LOG_FILE = LOG_FILE
@@ -118,6 +118,7 @@ class DNAnexusUpload:
         self.viewers = viewers
         self.contributors = contributors
 	self.release = release
+        self.develop = develop
 
         self.project_dxid = None
         self.interop_tar = None
@@ -603,7 +604,7 @@ class Autocopy:
 
     def __init__(self, log_file=None, no_copy=False, no_lims=False, no_email=False, 
                  test_mode_lims=False, config=None, errors_to_terminal=False, 
-                 dnanexus=False, upload_mode=None, release=False):
+                 dnanexus=False, upload_mode=None, release=False, develop=False):
 
         self.dnanexus = dnanexus        # Boolean flag
         self.upload_mode = upload_mode  # ['API', 'UploadAgent']
@@ -1043,7 +1044,8 @@ class Autocopy:
                                                  upload_mode = self.upload_mode,
                                                  viewers = self.VIEWERS,
                                                  contributors = self.CONTRIBUTORS,
-						 release = self.release
+						 release = self.release,
+                                                 develop = self.develop
                                                 )
             dnanexus_upload.run()
             #lims_runinfo = self.get_runinfo_from_lims(rundirObject=rundir) 
@@ -1418,6 +1420,8 @@ class Autocopy:
                           default='UploadAgent', help="Specify how to upload files to DNAnexus ['API', 'UploadAgent']")
 	parser.add_option("-r", "--release", dest="release", action="store_true", default=False,
 			  help='Specify whether to automatically release DNAnexus projects to user')
+        parser.add_option("-v", "--develop", dest="develop", action="store_true", default=False,
+                          help="Use development settings for creating objects on DNAnexus")
         (opts, args) = parser.parse_args()
         return (opts, args)
 
@@ -1448,6 +1452,8 @@ if __name__=='__main__':
                         test_mode_lims = opts.test_mode_lims, 
                         dnanexus = opts.dnanexus,
                         upload_mode = opts.upload_mode,
-			release = opts.release)
+			release = opts.release,
+                        develop = opts.develop
+                        )
     print("Running")
     autocopy.run()
