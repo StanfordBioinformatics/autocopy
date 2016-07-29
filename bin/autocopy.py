@@ -134,9 +134,9 @@ class DNAnexusUpload:
 
         # Tar interop and metadata files
         self.interop_tar = self.tar_interop_dir()
-	#self.thumbnails_tar = self.tar_thumbnails_dir()
 
         # Tar metadata files
+        # DEV: RTA cutoff value should be 1.18.54... but this has worked? 7/29/2016
         print 'RTA version is: %s' % self.rta_version
         if StrictVersion(self.rta_version) < StrictVersion('2.0.0'):
             print 'Tarring files according to RTA v1 pattern'
@@ -296,64 +296,6 @@ class DNAnexusUpload:
                                                  stderr=self.LOG_FILE)
         return tar_path
 
-    '''
-    def tar_rta_v1_rundir(self):
-         Description: DEPRECATED. Need to tar the lane directory in Data/Intensities/L00N as well as in
-            Data/Intensities/BaseCalls/L00N.
-        
-
-        lane_tar_files = {}
-        basecalls_dir = os.path.join(self.rundir.get_path(), 'Data', 'Intensities', 'BaseCalls')
-
-        for filename in os.listdir(basecalls_dir):
-            if fnmatch.fnmatch(filename, 'L0*'):
-                lane_name = filename
-                lane_index = int(filename[-1:])
-                tar_name = '%s_L%d.tar.gz' % (self.rundir.get_dir(), lane_index)
-                tar_path = os.path.join(self.tar_dir, tar_name)
-                # Check if tarball already exists. If not, create it.
-                if os.path.isfile(tar_path):
-                        lane_tar_files[lane_index] = tar_path
-                else:
-                        intens_rel_path = os.path.join('Data', 'Intensities', lane_name)
-                        basecall_rel_path = os.path.join('Data', 'Intensities', 'BaseCalls', lane_name)
-                        lane_tar_list = ['tar', '-C', self.rundir.get_path(),
-                                         '-czf', tar_path, intens_rel_path, basecall_rel_path
-                                        ]
-                        lane_tar_proc = subprocess.call(lane_tar_list, stdout=self.LOG_FILE,
-                                                         stderr=self.LOG_FILE)
-                        lane_tar_files[lane_index] = tar_path
-        return lane_tar_files
-
-    def tar_rta_v2_rundir(self):
-         Description: DEPRECATED. With Real Time Analysis (RTA) version 2 software, all of the lane files
-            have been aggregated into a single directory in Data/Intensities/BaseCalls/L00N
-        
-
-        lane_tar_files = {}
-        basecalls_dir = os.path.join(self.rundir.get_path(), 'Data', 'Intensities', 'BaseCalls')
-
-        for filename in os.listdir(basecalls_dir):
-            if fnmatch.fnmatch(filename, 'L0*'):
-                lane_name = filename
-                lane_index = int(lane_name[-1:])
-                tar_name = '%s_L%d.tar.gz' % (self.rundir.get_dir(), lane_index)
-                tar_path = os.path.join(self.tar_dir, tar_name)
-                # Check if tarball already exists. If not, create it.
-                if os.path.isfile(tar_path):
-                        lane_tar_files[lane_index] = tar_path
-                else :
-                        basecall_rel_path = os.path.join('Data', 'Intensities', 'BaseCalls', lane_name)
-            		s_locs_path = os.path.join('Data', 'Intensities', 's.locs')
-                        lane_tar_list = ['tar', '-C', self.rundir.get_path(),
-                                         '-czf', tar_path, basecall_rel_path, s_locs_path
-                                        ]
-                        lane_tar_proc = subprocess.call(lane_tar_list, stdout=self.LOG_FILE,
-                                                         stderr=self.LOG_FILE)
-                        lane_tar_files[lane_index] = tar_path
-        return lane_tar_files
-    '''
-
     def upload_file(self, file_path, class_name, project_dxid, folder): 
         upload_file_dxid = None
         file_basename = os.path.basename(file_path)
@@ -457,7 +399,18 @@ class DNAnexusUpload:
         return [interop_dxid, metadata_dxid, lane_dxid]
 
     def get_dnanexus_project(self, lane_index, contains_phi=False):
-        project_name = '%s_L%d' % (self.rundir.get_dir(), lane_index)
+        if self.develop:
+            project_name = 'dev_%s_L%d' % (self.rundir.get_dir(), lane_index)
+        else:
+            project_name = '%s_L%d' % (self.rundir.get_dir(), lane_index)
+
+        properties = {
+                      'lane_name': '%s_L%d' % (self.rundir.get_dir(), lane_index),
+                      'run_name': '%s' % (self.rundir.get_dir()),
+                      'lane_index': '%d' % lane_index,
+                     }
+        if self.develop:
+            properties['development'] = 'true'
 
         # Check whether project already exists
         project_generator = dxpy.find_projects(name=project_name, name_mode='exact')
@@ -470,6 +423,7 @@ class DNAnexusUpload:
             # Create new DNAnexus project
             input_params = {'name': project_name,
                             'containsPHI': contains_phi,
+                            'properties': properties
                            }
             project_dxid = dxpy.api.project_new(input_params=input_params)['id']
             # Add project viewers & contributors
