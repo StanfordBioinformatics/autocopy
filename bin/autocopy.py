@@ -106,7 +106,8 @@ class ValidationError(Exception):
 class DNAnexusUpload:
 
     def __init__(self, rundir, tar_dir, LOG_FILE, initiate_analysis_script, lims_url, 
-                 lims_token, test, upload_mode, viewers, contributors, release, develop):
+                 lims_token, test, upload_mode, viewers, contributors, dx_env_config, 
+                 dx_workflow_config_dir, release, develop):
         self.rundir = rundir            # RunDir object
         self.tar_dir = tar_dir
         self.LOG_FILE = LOG_FILE
@@ -117,6 +118,8 @@ class DNAnexusUpload:
         self.upload_mode = upload_mode  # ['API', 'UploadAgent']
         self.viewers = viewers
         self.contributors = contributors
+        self.dx_workflow_config_dir = dx_workflow_config_dir
+        self.dx_env_config = dx_env_config
 	self.release = release
         self.develop = develop
 
@@ -157,7 +160,7 @@ class DNAnexusUpload:
             self.project_dxid = self.get_dnanexus_project(lane_index)
             dxids = self.upload_lane(lane_index=lane_index, lane_tar=lane_tar)
             self.file_dxids[lane_index] = dxids
-            self.initiate_analysis(lane_index)
+            self.call_initiate_analysis(lane_index)
 
     def get_rta_version(self):
         params_file = os.path.join(self.rundir.get_path(), 'runParameters.xml')
@@ -342,7 +345,11 @@ class DNAnexusUpload:
            	upload_file_dxfile.set_properties(properties = {'upload_complete': 'true'})
             
             elif self.upload_mode == 'UploadAgent':
-		log_file = '/seqctr/Runs/DNAnexus_Logs/%s.ua.log' % file_basename
+		
+                if self.develop:
+                    log_file = '/seqctr/Runs/DNAnexus_Logs/dev_%s.ua.log' % file_basename
+                else:
+                    log_file = '/seqctr/Runs/DNAnexus_Logs/%s.ua.log' % file_basename
 
                 command = 'ua-1.5.13 '
                 command += '--auth-token pdt7ZQNjMKL6fgf56gGV8JbhUpjaRmlx '
@@ -405,9 +412,9 @@ class DNAnexusUpload:
             project_name = '%s_L%d' % (self.rundir.get_dir(), lane_index)
 
         properties = {
-                      'lane_name': '%s_L%d' % (self.rundir.get_dir(), lane_index),
-                      'run_name': '%s' % (self.rundir.get_dir()),
-                      'lane_index': '%d' % lane_index,
+                      'seq_lane_name': '%s_L%d' % (self.rundir.get_dir(), lane_index),
+                      'seq_run_name': '%s' % (self.rundir.get_dir()),
+                      'seq_lane_index': '%d' % lane_index,
                      }
         if self.develop:
             properties['development'] = 'true'
@@ -448,7 +455,7 @@ class DNAnexusUpload:
             sys.exit()
         return project_dxid
 
-    def initiate_analysis(self, lane_index):
+    def call_initiate_analysis(self, lane_index):
         # Initiate analysis
         print 'Info: Initiating analysis for %s L%d' % (self.rundir.get_dir(), int(lane_index))
         # List must contain only strings
@@ -459,12 +466,16 @@ class DNAnexusUpload:
                  '-r', self.rta_version,
                  '-u', self.lims_url,
                  '-o', self.lims_token,
-                 '-t', str(self.test)
+                 '-t', str(self.test),
+                 '-e', str(self.dx_env_config),
+                 '-w', str(self.dx_workflow_config_dir)
                 ]
 	if self.release:
 		analysis_list.append('-e')
         print analysis_list
-        analysis_proc = subprocess.Popen(analysis_list, stdout=self.LOG_FILE, stderr=self.LOG_FILE) 
+        analysis_str = ' '.join(str(element) for element in analysis_list)
+        print analysis_list
+        analysis_proc = subprocess.Popen(analysis_str, stdout=self.LOG_FILE, stderr=self.LOG_FILE, shell=True) 
 
     def createSubprocess(self, cmd, pipeStdout=False, checkRetcode=True):
         """
@@ -563,17 +574,29 @@ class Autocopy:
         self.dnanexus = dnanexus        # Boolean flag
         self.upload_mode = upload_mode  # ['API', 'UploadAgent']
 	self.release = release
-
+        self.develop = develop
+        
+        print 'Initializing config'
         self.initialize_config(config)
+        print 'Initializing log file'
         self.initialize_log_file(log_file)
+        print 'Log starting autocopy message'
         self.log_starting_autocopy_message()
+        print 'Initializ no copy option'
         self.initialize_no_copy_option(no_copy)
+        print 'Initialize hostname'
         self.initialize_hostname()
+        print 'Initialize LIMS connection'
         self.initialize_lims_connection(test_mode_lims, no_lims)
+        print 'Initialize mail server'
         self.initialize_mail_server(no_email)
+        print 'Initialize run roots'
         self.initialize_run_roots()
+        print 'Initialize signals'
         self.initialize_signals()
+        print 'Redirect output to log'
         self.redirect_stdout_stderr_to_log(errors_to_terminal)
+        print 'Init complete'
 
 
     def cleanup(self):
@@ -998,6 +1021,8 @@ class Autocopy:
                                                  upload_mode = self.upload_mode,
                                                  viewers = self.VIEWERS,
                                                  contributors = self.CONTRIBUTORS,
+                                                 dx_env_config = self.DX_ENV_CONFIG,
+                                                 dx_workflow_config_dir = self.DX_WORKFLOW_CONFIG_DIR,
 						 release = self.release,
                                                  develop = self.develop
                                                 )
@@ -1024,6 +1049,10 @@ class Autocopy:
     def send_email_autocopy_exception(self, exception):
         tb = traceback.format_exc(exception)
         email_subj = "Autocopy unknown exception"
+        email_body = "The autocopy daemon failed with Exception\n" + tb
+        self.send_email(self.EMAIL_TO, email_subj, email_body)
+
+    def send_email_autocopy_started(self):
         email_body = "The autocopy daemon failed with Exception\n" + tb
         self.send_email(self.EMAIL_TO, email_subj, email_body)
 
@@ -1252,12 +1281,12 @@ class Autocopy:
             'MAX_COPY_PROCESSES': validate_int,
             'EMAIL_TO': validate_str,
             'EMAIL_FROM': validate_str,
+            'COPY_SOURCE_RUN_ROOTS': validate_list,
+            'COPY_SOURCE_RUN_TARS': validate_str,
             'COPY_DEST_HOST': validate_cmdline_safe_str,
             'COPY_DEST_USER':validate_cmdline_safe_str,
             'COPY_DEST_GROUP': validate_cmdline_safe_str,
             'COPY_DEST_RUN_ROOT': validate_cmdline_safe_str,
-            'COPY_SOURCE_RUN_ROOTS': validate_list,
-        'COPY_SOURCE_RUN_TARS': validate_str,
             'MIN_FREE_SPACE': validate_int,
             'MAIN_LOOP_DELAY_SECONDS': validate_int,
             'RUNROOT_FREESPACE_CHECK_DELAY_SECONDS': validate_int,
@@ -1271,7 +1300,9 @@ class Autocopy:
             'INITIATE_ANALYSIS_SCRIPT': validate_str,
             'UPLOAD_AGENT': validate_str,
             'VIEWERS': validate_list,
-            'CONTRIBUTORS': validate_list
+            'CONTRIBUTORS': validate_list,
+            'DX_ENV_CONFIG': validate_str,
+            'DX_WORKFLOW_CONFIG_DIR': validate_str
         }
 
         for key in config.keys():

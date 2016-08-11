@@ -24,7 +24,7 @@ from scgpm_lims import RunInfo
 class LaneAnalysis:
 
     def __init__(self, run_name, lane_index, project_id, rta_version, lims_url, lims_token, 
-                 release=False, test_mode=False):
+                 release=False, test_mode=False, develop=False):
         self.run_name = run_name
         self.project_id = project_id
         self.lane_index = lane_index
@@ -33,6 +33,7 @@ class LaneAnalysis:
         self.lims_token = lims_token
         self.release = release
         self.test_mode = test_mode
+        self.develop = develop
 
         # Workflow variables
         self.workflow_name = None
@@ -54,6 +55,8 @@ class LaneAnalysis:
         self.connection = Connection(lims_url=lims_url, lims_token=lims_token)
         self.run_info = RunInfo(conn=self.connection, run=run_name)
         self.lane_info = self.run_info.get_lane(self.lane_index)
+        dna_library_id = int(self.lane_info['dna_library_id'])
+        self.dna_library_info = self.connection.getdnalibraryinfo(dna_library_id)
 
         # Bcl2fastq & demultiplexing variables
         self.barcode_mismatches = int(1)
@@ -87,39 +90,47 @@ class LaneAnalysis:
                                 'lane_data_tar': self.lane_tar_id,
                                 'metadata_tar': self.metadata_tar_id,
                                 'interop_tar': self.interop_tar_id,
-                                'record_id': self.record_id,
+                                'record_id': "%s:%s" % (self.dashboard_project_id, self.record_id),
                                 'test_mode': self.test_mode,
                                 'mismatches': self.barcode_mismatches,
-                                'paired_end': self.run_info.data['paired_end']
+                                'paired_end': self.run_info.data['paired_end'],
+                                'develop': self.develop 
         }
         
 
-    def create_dxrecord(self, develop):
+    def create_dxrecord(self, develop, dashboard_project_id):
         details = self._set_record_details()
         properties = self._set_record_properties()
+        
         if develop:
-            properties['development'] = 'true'
+            record_name = 'dev_%s_L%d' % (self.run_name, self.lane_index)            
+            properties['production'] = 'false'
             properties['status'] = 'uploading'
             details['email'] = 'pbilling@stanford.edu'
-            
-        
+                        
+        else:
+            record_name = '%s_L%d' % (self.run_name, self.lane_index)
+            properties['production'] = 'true'
+                    
         record_generator = dxpy.find_data_objects(classname = 'record', 
-                                                  name = 'dev_%s_L%d' % (self.run_name, self.lane_index),
+                                                  name = record_name,
                                                   name_mode = 'exact',
-                                                  project = self.dashboard_project_id,
+                                                  project = dashboard_project_id,
                                                   folder = '/')
         records = list(record_generator)
         if len(records) > 0:
             self.record_id = records[0]['id']
         else:
-            self.record_id = dxpy.api.record_new(input_params={
-                                                               "project": self.dashboard_project_id,
-                                                               "name": 'dev_%s_L%d' % (self.run_name, self.lane_index),
-                                                               "types": ["SCGPMRun"],
-                                                               "properties": properties,
-                                                               "details": details
-                                                              } )['id']
-        dxpy.api.record_close(self.record_id)
+            input_params={
+                          "project": dashboard_project_id,
+                          "name": record_name,
+                          "types": ["SCGPMRun"],
+                          "properties": properties,
+                          "details": details
+                         }
+            print input_params
+            self.record_id = dxpy.api.record_new(input_params)
+            dxpy.api.record_close(self.record_id)
     
     def choose_workflow(self, environment_json, develop):
         with open(environment_json) as JSON:
@@ -352,7 +363,7 @@ class LaneAnalysis:
                 self.record.set_properties({'pipeline_id': str(json['id'])})
                 print 'Info: Created new LIMS pipeline run %s' % str(json['id'])
 
-        def _set_record_details(self): 
+    def _set_record_details(self): 
         
         details = {
                    'email': str(self.lane_info['submitter_email']), 
@@ -375,10 +386,10 @@ class LaneAnalysis:
         else:
             paired_end = 'false'
 
-            properties = {
-                          'mapper': str(self.mapper),
-                          'mismatches': str(self.map_mismatches),
-                          'flowcell_id': str(self.run_info.data['flow_cell_id']),
+        properties = {
+                      'mapper': str(self.mapper),
+                      'mismatches': str(self.map_mismatches),
+                      'flowcell_id': str(self.run_info.data['flow_cell_id']),
                           'seq_instrument': str(self.run_info.data['sequencing_instrument']),
                           'lane_project_id': str(self.project_id),
                           'lab_name': str(self.lane_info['lab']),
@@ -391,24 +402,31 @@ class LaneAnalysis:
                           'library_id': str(self.lane_info['dna_library_id']),
                           'lane_id': str(self.lane_info['id']),
                           # To be added with dna_libraries API function:
-                          'billing_account1': {'id':'','perc':''},
-                          'billing_account2': {'id':'','perc':''},
-                          'billing_account3': {'id':'','perc':''},
-                          'experiment_type': '',
-                          'organism': '',
-                          'sample_volume': '',
-                          'average_molecule_size': '',
-                          'template_concentration_1': '',
-                          'template_concentration_2': '',
-                          'template_concentration_3': ''
+                          'submission_date': self.dna_library_info['submission_date'],
+                          'billing_account1': {
+                                               'id':self.dna_library_info['billing_account'],
+                                               'perc':self.dna_library_info['billing_account_percent']
+                                              },
+                          'billing_account2': {
+                                               'id':self.dna_library_info['billing_account2'],
+                                               'perc':self.dna_library_info['billing_account2_percent']
+                                              },
+                          'billing_account3': {
+                                               'id':self.dna_library_info['billing_account3'],
+                                               'perc':self.dna_library_info['billing_account3_percent']
+                                              },
+                          'experiment_type': self.dna_library_info['experiment_type_id'],
+                          'organism': self.dna_library_info['organism_id'],
+                          'sample_volume': self.dna_library_info['sample_volume'],
+                          'average_molecule_size': self.dna_library_info['average_size']
                          }
 
-            if self.mapper:
-                self.get_reference_ids()
-                properties['reference_genome_id'] = self.reference_genome_id
-                properties['reference_index_id'] = self.reference_index_id
-            
-            return properties
+        if self.mapper:
+            self.get_reference_ids()
+            properties['reference_genome_id'] = self.reference_genome_id
+            properties['reference_index_id'] = self.reference_index_id
+
+        return properties
 
 def parse_args():
 
@@ -427,6 +445,14 @@ def parse_args():
                         help='Only use one tile for analyses', required=True)
     parser.add_argument('-d', '--develop', dest='develop', default=False, action='store_true',
                         help='Create DNAnexus object in developer mode')
+    parser.add_argument('-u', '--lims-url', dest='lims_url', type=str,
+                        help='LIMS URL')
+    parser.add_argument('-o', '--lims-token', dest='lims_token', type=str,
+                        help='LIMS token')
+    parser.add_argument('-e', '--dx-env-config', dest='dx_env_config', type=str,
+                        help='DNAnexus environment configuration file'),
+    parser.add_argument('-x', '--dx-workflow-config-dir', dest='dx_workflow_config_dir', type=str,
+                        help='Directory path containing DNAnexus workflow templates')
     args = parser.parse_args()
     return args
 
@@ -442,12 +468,17 @@ def main():
         test_mode = False
 
     # Load DNAnexus environment file
+    # TO DO: Configure this data in autocopy config file
     help_dir = os.path.dirname(os.path.abspath(__file__))
     scripts_dir = os.path.split(help_dir)[0]
     home = os.path.split(scripts_dir)[0]
     
-    environment_json = os.path.join(home, "dnanexus_environment.json")
-    workflow_config_dir = os.path.join(home, "workflow_config_templates")
+    #environment_json = os.path.join(home, "dnanexus_environment.json")
+    #workflow_config_dir = os.path.join(home, "workflow_config_templates")
+
+    with open(args.dx_env_config, 'r') as DXENV:
+        dx_environment_json = json.load(DXENV)
+        dashboard_project_id = dx_environment_json['dashboard_records']['project_id']
 
     lane_analysis = LaneAnalysis(run_name = args.run_name, 
                                  lane_index = int(args.lane_index), 
@@ -455,16 +486,16 @@ def main():
                                  rta_version = args.rta_version, 
                                  lims_url = args.lims_url, 
                                  lims_token = args.lims_token,
-                                 release = args.release, 
-                                 test_mode = test_mode
-                                 )
+                                 release = args.release,
+                                 develop = args.develop, 
+                                 test_mode = test_mode)
     #pdb.set_trace()
     print 'Info: Creating Dashboard record'
-    lane_analysis.create_dxrecord(args.develop)
+    lane_analysis.create_dxrecord(args.develop, dashboard_project_id)
     print 'Info: Choosing Workflow'
-    lane_analysis.choose_workflow(environment_json, args.develop)
+    lane_analysis.choose_workflow(dx_environment_json, args.develop)
     print 'Info: Configure Analysis'
-    lane_analysis.configure_analysis(workflow_config_dir)
+    lane_analysis.configure_analysis(args.workflow_config_dir)
     print 'Info: Launching analysis'
     lane_analysis.run_analysis()
 
