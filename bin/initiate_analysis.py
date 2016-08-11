@@ -24,7 +24,7 @@ from scgpm_lims import RunInfo
 class LaneAnalysis:
 
     def __init__(self, run_name, lane_index, project_id, rta_version, lims_url, lims_token, 
-                 release=False, test_mode=False, develop=False):
+                 dashboard_project_id, release=False, test_mode=False, develop=False):
         self.run_name = run_name
         self.project_id = project_id
         self.lane_index = lane_index
@@ -46,7 +46,7 @@ class LaneAnalysis:
         self.analysis_input = None
 
         self.record_id = None
-        self.dashboard_project_id = None
+        self.dashboard_project_id = dashboard_project_id
     
         self.metadata_tar_id = None
         self.interop_tar_id = None
@@ -86,55 +86,53 @@ class LaneAnalysis:
 
         self.get_lane_input_files()
         
+    def set_workflow_inputs(self):
         self.workflow_inputs = {
-                                'lane_data_tar': self.lane_tar_id,
-                                'metadata_tar': self.metadata_tar_id,
-                                'interop_tar': self.interop_tar_id,
+                                'lane_data_tar_id': self.lane_tar_id,
+                                'metadata_tar_id': self.metadata_tar_id,
+                                'interop_tar_id': self.interop_tar_id,
                                 'record_id': "%s:%s" % (self.dashboard_project_id, self.record_id),
                                 'test_mode': self.test_mode,
-                                'mismatches': self.barcode_mismatches,
+                                'barcode_mismatches': self.barcode_mismatches,
                                 'paired_end': self.run_info.data['paired_end'],
                                 'develop': self.develop 
         }
-        
-
-    def create_dxrecord(self, develop, dashboard_project_id):
+        #pdb.set_trace()
+    def create_dxrecord(self, develop):
         details = self._set_record_details()
         properties = self._set_record_properties()
         
         if develop:
             record_name = 'dev_%s_L%d' % (self.run_name, self.lane_index)            
-            properties['production'] = 'false'
+            details['production'] = 'false'
             properties['status'] = 'uploading'
             details['email'] = 'pbilling@stanford.edu'
                         
         else:
             record_name = '%s_L%d' % (self.run_name, self.lane_index)
-            properties['production'] = 'true'
+            details['production'] = 'true'
                     
         record_generator = dxpy.find_data_objects(classname = 'record', 
                                                   name = record_name,
                                                   name_mode = 'exact',
-                                                  project = dashboard_project_id,
+                                                  project = self.dashboard_project_id,
                                                   folder = '/')
         records = list(record_generator)
         if len(records) > 0:
             self.record_id = records[0]['id']
         else:
             input_params={
-                          "project": dashboard_project_id,
+                          "project": self.dashboard_project_id,
                           "name": record_name,
                           "types": ["SCGPMRun"],
                           "properties": properties,
                           "details": details
                          }
             print input_params
-            self.record_id = dxpy.api.record_new(input_params)
+            self.record_id = dxpy.api.record_new(input_params)['id']
             dxpy.api.record_close(self.record_id)
     
-    def choose_workflow(self, environment_json, develop):
-        with open(environment_json) as JSON:
-            dnanexus_environment = json.load(JSON)
+    def choose_workflow(self, dx_environment_json, develop):
 
         # Determine appropriate workflow based on required operations
         operations = ['bcl2fastq', 'qc']    # Default operations for all analyses
@@ -144,11 +142,13 @@ class LaneAnalysis:
             operations.append('release')
 
         if develop:
-            workflows = dnanexus_environment['development_workflows']
+            workflows = dx_environment_json['development_workflows']
         else:
-            workflows = dnanexus_environment['production_workflows']
+            workflows = dx_environment_json['production_workflows']
 
-        for workflow in workflows:
+        for workflow_name in workflows:
+            workflow = workflows[workflow_name]
+            # pdb.set_trace()
             if set(operations) == set(workflow['operations']):
                 self.workflow_name = workflow
                 self.workflow_id = workflow['id']
@@ -164,10 +164,14 @@ class LaneAnalysis:
 
         # Set workflow inputs
         self.analysis_input = {}
-        for stage in workflow_json['stages']:
+        for stage_index in workflow_json['stages']:
+            stage = workflow_json['stages'][stage_index]
             for entry in stage['input']:
-                key = '%d.%s' % (int(stage), entry)
-                if stage['input'][entry][0] == '$':
+                key = '%d.%s' % (int(stage_index), entry)
+                if len(stage['input'][entry]) < 1:
+                    # No value needed; skip
+                    continue
+                elif stage['input'][entry][0] == '$':
                     # Value is a variable defined in workflow_inputs dict
                     elements = stage['input'][entry].split('-')
                     if elements[0] == '$dnanexus_link':
@@ -331,12 +335,13 @@ class LaneAnalysis:
                                                  )['id']
 
     def run_analysis(self):
-        self.record = dxpy.DXRecord(id=self.record_id, project=self.dashboard_project_id)
+        #pdb.set_trace()
+        self.record = dxpy.DXRecord(dxid=self.record_id, project=self.dashboard_project_id)
         properties = self.record.get_properties()
         if not 'analysis_started' in properties.keys():
             print 'Warning: Could not determine whether or not analysis had been started'
-            dxpy.set_workspace_id(id=self.project_id)
-            self.workflow_object = dxpy.DXWorkflow(id=self.workflow_id)
+            dxpy.set_workspace_id(dxid=self.project_id)
+            self.workflow_object = dxpy.DXWorkflow(dxid=self.workflow_id)
             print 'Launching workflow %s with input: %s' % (self.workflow_object.describe()['id'], 
                                                              self.analysis_input)
             self.workflow_object.run(workflow_input=self.analysis_input, 
@@ -347,21 +352,22 @@ class LaneAnalysis:
             print 'Info: Analysis has already been started; skipping.'
             pass
         elif properties['analysis_started'] == 'false':
-            dxpy.set_workspace_id(id=self.project_id)
-            self.workflow_object = dxpy.DXWorkflow(id=self.workflow_id)
+            dxpy.set_workspace_id(dxid=self.project_id)
+            self.workflow_object = dxpy.DXWorkflow(dxid=self.workflow_id)
             print 'Launching workflow %s with input: %s' % (self.workflow_object.describe()['id'], 
                                                             self.analysis_input)
-            self.workflow_object.run(workflow_input=self.workflow_input, 
+            self.workflow_object.run(workflow_input=self.analysis_input, 
                                      project=self.project_id, 
                                      folder='/')
             self.record.set_properties({'analysis_started': 'true'})
 
             # Create new pipeline run in LIMS
-            if self.lane_index == 1:
-                param_dict = {'started': True}
-                json = self.connection.createpipelinerun(self.run_name, param_dict)
-                self.record.set_properties({'pipeline_id': str(json['id'])})
-                print 'Info: Created new LIMS pipeline run %s' % str(json['id'])
+            if not self.develop:
+                if self.lane_index == 1:
+                    param_dict = {'started': True}
+                    json = self.connection.createpipelinerun(self.run_name, param_dict)
+                    self.record.set_properties({'pipeline_id': str(json['id'])})
+                    print 'Info: Created new LIMS pipeline run %s' % str(json['id'])
 
     def _set_record_details(self): 
         
@@ -390,36 +396,30 @@ class LaneAnalysis:
                       'mapper': str(self.mapper),
                       'mismatches': str(self.map_mismatches),
                       'flowcell_id': str(self.run_info.data['flow_cell_id']),
-                          'seq_instrument': str(self.run_info.data['sequencing_instrument']),
-                          'lane_project_id': str(self.project_id),
-                          'lab_name': str(self.lane_info['lab']),
-                          'lims_token': str(self.lims_token),
-                          'lims_url': str(self.lims_url),
-                          'rta_version': str(self.rta_version),
-                          'paired_end': paired_end,
-                          'analysis_started': 'false',
-                          'status': 'running_pipeline',
-                          'library_id': str(self.lane_info['dna_library_id']),
-                          'lane_id': str(self.lane_info['id']),
-                          # To be added with dna_libraries API function:
-                          'submission_date': self.dna_library_info['submission_date'],
-                          'billing_account1': {
-                                               'id':self.dna_library_info['billing_account'],
-                                               'perc':self.dna_library_info['billing_account_percent']
-                                              },
-                          'billing_account2': {
-                                               'id':self.dna_library_info['billing_account2'],
-                                               'perc':self.dna_library_info['billing_account2_percent']
-                                              },
-                          'billing_account3': {
-                                               'id':self.dna_library_info['billing_account3'],
-                                               'perc':self.dna_library_info['billing_account3_percent']
-                                              },
-                          'experiment_type': self.dna_library_info['experiment_type_id'],
-                          'organism': self.dna_library_info['organism_id'],
-                          'sample_volume': self.dna_library_info['sample_volume'],
-                          'average_molecule_size': self.dna_library_info['average_size']
-                         }
+                      'seq_instrument': str(self.run_info.data['sequencing_instrument']),
+                      'lane_project_id': str(self.project_id),
+                      'lab_name': str(self.lane_info['lab']),
+                      'lims_token': str(self.lims_token),
+                      'lims_url': str(self.lims_url),
+                      'rta_version': str(self.rta_version),
+                      'paired_end': paired_end,
+                      'analysis_started': 'false',
+                      'status': 'running_pipeline',
+                      'library_id': str(self.lane_info['dna_library_id']),
+                      'lane_id': str(self.lane_info['id']),
+                      # To be added with dna_libraries API function:
+                      'submission_date': self.dna_library_info['submission_date'],
+                      'billing_account1_id': str(self.dna_library_info['billing_account']),
+                      'billing_account1_perc':str(self.dna_library_info['billing_account_percent']),
+                      'billing_account2_id': str(self.dna_library_info['billing_account2']),
+                      'billing_account2_perc':str(self.dna_library_info['billing_account2_percent']),
+                      'billing_account3_id': str(self.dna_library_info['billing_account3']),
+                      'billing_account3_perc': str(self.dna_library_info['billing_account3_percent']),
+                      'experiment_type': str(self.dna_library_info['experiment_type_id']),
+                      'organism': str(self.dna_library_info['organism_id']),
+                      'sample_volume': str(self.dna_library_info['sample_volume']),
+                      'average_molecule_size': str(self.dna_library_info['average_size'])
+                     }
 
         if self.mapper:
             self.get_reference_ids()
@@ -449,9 +449,9 @@ def parse_args():
                         help='LIMS URL')
     parser.add_argument('-o', '--lims-token', dest='lims_token', type=str,
                         help='LIMS token')
-    parser.add_argument('-e', '--dx-env-config', dest='dx_env_config', type=str,
+    parser.add_argument('-v', '--dx-env-config', dest='dx_env_config', type=str,
                         help='DNAnexus environment configuration file'),
-    parser.add_argument('-x', '--dx-workflow-config-dir', dest='dx_workflow_config_dir', type=str,
+    parser.add_argument('-w', '--dx-workflow-config-dir', dest='dx_workflow_config_dir', type=str,
                         help='Directory path containing DNAnexus workflow templates')
     args = parser.parse_args()
     return args
@@ -486,16 +486,19 @@ def main():
                                  rta_version = args.rta_version, 
                                  lims_url = args.lims_url, 
                                  lims_token = args.lims_token,
+                                 dashboard_project_id = dashboard_project_id,
                                  release = args.release,
                                  develop = args.develop, 
                                  test_mode = test_mode)
     #pdb.set_trace()
-    print 'Info: Creating Dashboard record'
-    lane_analysis.create_dxrecord(args.develop, dashboard_project_id)
+    print 'Info: Creating Dashboard Record'
+    lane_analysis.create_dxrecord(args.develop)
     print 'Info: Choosing Workflow'
     lane_analysis.choose_workflow(dx_environment_json, args.develop)
+    print 'Info: Setting Workflow Inputs'
+    lane_analysis.set_workflow_inputs()
     print 'Info: Configure Analysis'
-    lane_analysis.configure_analysis(args.workflow_config_dir)
+    lane_analysis.configure_analysis(args.dx_workflow_config_dir)
     print 'Info: Launching analysis'
     lane_analysis.run_analysis()
 

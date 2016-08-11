@@ -467,14 +467,17 @@ class DNAnexusUpload:
                  '-u', self.lims_url,
                  '-o', self.lims_token,
                  '-t', str(self.test),
-                 '-e', str(self.dx_env_config),
+                 '-v', str(self.dx_env_config),
                  '-w', str(self.dx_workflow_config_dir)
                 ]
+        # Optional arguments
 	if self.release:
-		analysis_list.append('-e')
+	    analysis_list.append('-e')
+        if self.develop:
+            analysis_list.append('-d')
         print analysis_list
         analysis_str = ' '.join(str(element) for element in analysis_list)
-        print analysis_list
+        print analysis_str
         analysis_proc = subprocess.Popen(analysis_str, stdout=self.LOG_FILE, stderr=self.LOG_FILE, shell=True) 
 
     def createSubprocess(self, cmd, pipeStdout=False, checkRetcode=True):
