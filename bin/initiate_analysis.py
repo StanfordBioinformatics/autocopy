@@ -9,6 +9,7 @@
     8. Update record status to 'pipeline_running'
 '''
 
+import re
 import os
 import pdb
 import sys
@@ -54,13 +55,31 @@ class LaneAnalysis:
 
         self.connection = Connection(lims_url=lims_url, lims_token=lims_token)
         self.run_info = RunInfo(conn=self.connection, run=run_name)
+        print '\nRUN INFO\n'
+        print self.run_info
+        print '\n'
         self.lane_info = self.run_info.get_lane(self.lane_index)
+        print '\nLANE INFO\n'
+        print self.lane_info
+        print '\n'
         dna_library_id = int(self.lane_info['dna_library_id'])
         self.dna_library_info = self.connection.getdnalibraryinfo(dna_library_id)
+        print '\nLIBRARY INFO\n'
+        print self.dna_library_info
+        print '\n'
 
         # Bcl2fastq & demultiplexing variables
         self.barcode_mismatches = int(1)
 
+        # Get sequencing queue & tag project 
+        tags = []
+        tags.append(str(self.lane_info['queue']))
+        if self.dna_library_info['project_id']:
+            tags.append(str(self.dna_library_info['project_id']))
+        dxpy.api.project_add_tags(self.project_id, input_params={'tags':tags})
+        
+        comments = str(self.dna_library_info['comments'])
+        dxpy.DXProject(project_id).update(description=comments)
         # Mapping variables
         try:
             self.mapper = self.lane_info['mapping_requests'][0]['mapping_program']
