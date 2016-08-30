@@ -123,13 +123,13 @@ class LaneAnalysis:
         
         if develop:
             record_name = 'dev_%s_L%d' % (self.run_name, self.lane_index)            
-            details['production'] = 'false'
+            properties['production'] = 'false'
             properties['status'] = 'uploading'
             details['email'] = 'pbilling@stanford.edu'
                         
         else:
             record_name = '%s_L%d' % (self.run_name, self.lane_index)
-            details['production'] = 'true'
+            properties['production'] = 'true'
                     
         record_generator = dxpy.find_data_objects(classname = 'record', 
                                                   name = record_name,
