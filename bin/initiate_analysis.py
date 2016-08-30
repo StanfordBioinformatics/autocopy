@@ -98,8 +98,8 @@ class LaneAnalysis:
             self.map_mismatches = None
             self.reference_genome = None
     
-        self.reference_genome_id = None
-        self.reference_index_id = None
+        self.reference_genome_dxid = None
+        self.reference_index_dxid = None
         if self.reference_genome:
             self.get_reference_ids()
 
@@ -110,7 +110,7 @@ class LaneAnalysis:
                                 'lane_data_tar_id': self.lane_tar_id,
                                 'metadata_tar_id': self.metadata_tar_id,
                                 'interop_tar_id': self.interop_tar_id,
-                                'record_id': "%s:%s" % (self.dashboard_project_id, self.record_id),
+                                'record_link': "%s:%s" % (self.dashboard_project_id, self.record_id),
                                 'test_mode': self.test_mode,
                                 'barcode_mismatches': self.barcode_mismatches,
                                 'paired_end': self.run_info.data['paired_end'],
@@ -155,7 +155,7 @@ class LaneAnalysis:
 
         # Determine appropriate workflow based on required operations
         operations = ['bcl2fastq', 'qc']    # Default operations for all analyses
-        if self.reference_genome_id and self.reference_index_id:
+        if self.reference_genome_dxid and self.reference_index_dxid:
             operations.append('bwa')
         if self.release:
             operations.append('release')
@@ -209,9 +209,9 @@ class LaneAnalysis:
                 self.analysis_input[key] = value
 
     def configure_workflow(self):
-        ## DEV: Will be deprecated in 1.05
+        ## DEV: Will be deprecated in 1.1
         self.get_lane_input_files() 
-        if self.release and self.reference_genome_id and self.reference_index_id:
+        if self.release and self.reference_genome_dxid and self.reference_index_dxid:
             workflow_project_id = 'project-BqkQKbj0kjqjqj6bg8fp6pGk'  # 'WF_bcl2fastq_bwa_qc_release'
             workflow_name = 'WF_bcl2fastq_bwa_qc_release'
 
@@ -232,7 +232,7 @@ class LaneAnalysis:
                                    '3.record_id': self.record_id,
                                    '4.record_id': self.record_id # release_lane applet
                                   }
-        elif self.release and not self.reference_genome_id and not self.reference_index_id:
+        elif self.release and not self.reference_genome_dxid and not self.reference_index_dxid:
             workflow_project_id = 'project-Bv6gJv00vzgGZx4zZ5KKzJj0'  # 'WF_bcl2fastq_qc_release'
             workflow_name = 'WF_bcl2fastq_qc_release'
 
@@ -250,7 +250,7 @@ class LaneAnalysis:
                                    '2.paired_end': self.run_info.data['paired_end'],
                                    '2.record_id': self.record_id,
                                   }
-        elif self.reference_genome_id and self.reference_index_id:
+        elif self.reference_genome_dxid and self.reference_index_dxid:
             workflow_project_id = 'project-BpvKBv80ZgQJg4Y8ZQ0z3Z6f'  # 'WF_bcl2fastq_bwa_qc'
             workflow_name = 'WF_bcl2fastq_bwa_qc'
 
@@ -270,7 +270,7 @@ class LaneAnalysis:
                   '3.paired_end': self.run_info.data['paired_end'],
                   '3.record_id': self.record_id
                              }
-        elif not self.reference_genome_id and not self.reference_index_id:
+        elif not self.reference_genome_dxid and not self.reference_index_dxid:
             workflow_project_id = 'project-Bpv3PZQ0KY5P9vk59kg639jf'  # 'WF_bcl2fastq_qc'
             workflow_name = 'WF_bcl2fastq_qc'
 
@@ -306,7 +306,7 @@ class LaneAnalysis:
 
     def get_reference_ids(self):
         reference_genome_project = 'project-BJJ0GQQ09Vv5Q7GKYGzQ0066'
-        self.reference_genome_id = dxpy.find_one_data_object(classname='file',
+        self.reference_genome_dxid = dxpy.find_one_data_object(classname='file',
                                                              name='genome.fa.gz',
                                                              name_mode='exact',
                                                              project = reference_genome_project,
@@ -314,7 +314,7 @@ class LaneAnalysis:
                                                              zero_ok = False,
                                                              more_ok = False
                                                              )['id']
-        self.reference_index_id = dxpy.find_one_data_object(classname='file',
+        self.reference_index_dxid = dxpy.find_one_data_object(classname='file',
                                                             name='bwa_index.tar.gz',
                                                             name_mode='exact',
                                                             project = reference_genome_project,
@@ -442,8 +442,8 @@ class LaneAnalysis:
 
         if self.mapper:
             self.get_reference_ids()
-            properties['reference_genome_id'] = self.reference_genome_id
-            properties['reference_index_id'] = self.reference_index_id
+            properties['reference_genome_dxid'] = self.reference_genome_dxid
+            properties['reference_index_dxid'] = self.reference_index_dxid
 
         return properties
 
