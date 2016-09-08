@@ -48,6 +48,7 @@ class LaneAnalysis:
 
         self.record_id = None
         self.dashboard_project_id = dashboard_project_id
+        self.record_properties = None
     
         self.metadata_tar_id = None
         self.interop_tar_id = None
@@ -56,7 +57,7 @@ class LaneAnalysis:
         self.connection = Connection(lims_url=lims_url, lims_token=lims_token)
         self.run_info = RunInfo(conn=self.connection, run=run_name)
         print '\nRUN INFO\n'
-        print self.run_info
+        print self.run_info.data
         print '\n'
         self.lane_info = self.run_info.get_lane(self.lane_index)
         print '\nLANE INFO\n'
@@ -119,17 +120,17 @@ class LaneAnalysis:
         #pdb.set_trace()
     def create_dxrecord(self, develop):
         details = self._set_record_details()
-        properties = self._set_record_properties()
+        self.record_properties = self._set_record_properties()
         
         if develop:
             record_name = 'dev_%s_L%d' % (self.run_name, self.lane_index)            
-            properties['production'] = 'false'
-            properties['status'] = 'uploading'
+            self.record_properties['production'] = 'false'
+            self.record_properties['status'] = 'uploading'
             details['email'] = 'pbilling@stanford.edu'
                         
         else:
             record_name = '%s_L%d' % (self.run_name, self.lane_index)
-            properties['production'] = 'true'
+            self.record_properties['production'] = 'true'
                     
         record_generator = dxpy.find_data_objects(classname = 'record', 
                                                   name = record_name,
@@ -144,7 +145,7 @@ class LaneAnalysis:
                           "project": self.dashboard_project_id,
                           "name": record_name,
                           "types": ["SCGPMRun"],
-                          "properties": properties,
+                          "properties": self.record_properties,
                           "details": details
                          }
             print input_params
@@ -411,34 +412,42 @@ class LaneAnalysis:
         else:
             paired_end = 'false'
 
+        if self.dna_library_info['experiment_type_id']:
+            experiment_type = get_experiment_type(int(self.dna_library_info['experiment_type_id']))
+        else:
+            experiment_type = 'Unknown'
+
         properties = {
-                      'mapper': str(self.mapper),
-                      'mismatches': str(self.map_mismatches),
-                      'flowcell_id': str(self.run_info.data['flow_cell_id']),
-                      'seq_instrument': str(self.run_info.data['sequencing_instrument']),
-                      'lane_project_id': str(self.project_id),
-                      'lab_name': str(self.lane_info['lab']),
-                      'lims_token': str(self.lims_token),
-                      'lims_url': str(self.lims_url),
-                      'rta_version': str(self.rta_version),
-                      'paired_end': paired_end,
-                      'analysis_started': 'false',
-                      'status': 'running_pipeline',
-                      'library_id': str(self.lane_info['dna_library_id']),
-                      'lane_id': str(self.lane_info['id']),
-                      # To be added with dna_libraries API function:
-                      'submission_date': self.dna_library_info['submission_date'],
-                      'billing_account1_id': str(self.dna_library_info['billing_account']),
-                      'billing_account1_perc':str(self.dna_library_info['billing_account_percent']),
-                      'billing_account2_id': str(self.dna_library_info['billing_account2']),
-                      'billing_account2_perc':str(self.dna_library_info['billing_account2_percent']),
-                      'billing_account3_id': str(self.dna_library_info['billing_account3']),
-                      'billing_account3_perc': str(self.dna_library_info['billing_account3_percent']),
-                      'experiment_type': str(self.dna_library_info['experiment_type_id']),
-                      'organism': str(self.dna_library_info['organism_id']),
-                      'sample_volume': str(self.dna_library_info['sample_volume']),
-                      'average_molecule_size': str(self.dna_library_info['average_size'])
-                     }
+                        'mapper': str(self.mapper),
+                        'mismatches': str(self.map_mismatches),
+                        'flowcell_id': str(self.run_info.data['flow_cell_id']),
+                        'sequencing_instrument': str(self.run_info.data['sequencing_instrument']),
+                        'sequencer_type': str(self.run_info.data['platform_name']),
+                        'queue': str(self.lane_info['queue']), 
+                        'lane_project_id': str(self.project_id),
+                        'lab': str(self.lane_info['lab']),
+                        'lims_token': str(self.lims_token),
+                        'lims_url': str(self.lims_url),
+                        'rta_version': str(self.rta_version),
+                        'paired_end': paired_end,
+                        'analysis_started': 'false',
+                        'status': 'running_pipeline',
+                        'library_id': str(self.lane_info['dna_library_id']),
+                        'lane_id': str(self.lane_info['id']),
+                        # Added by dna_libraries API function:
+                        'submission_date': self.dna_library_info['submission_date'],
+                        'billing_account1_id': str(self.dna_library_info['billing_account']),
+                        'billing_account1_perc':str(self.dna_library_info['billing_account_percent']),
+                        'billing_account2_id': str(self.dna_library_info['billing_account2']),
+                        'billing_account2_perc':str(self.dna_library_info['billing_account2_percent']),
+                        'billing_account3_id': str(self.dna_library_info['billing_account3']),
+                        'billing_account3_perc': str(self.dna_library_info['billing_account3_percent']),
+                        'experiment_id': str(self.dna_library_info['experiment_type_id']),
+                        'experiment_type': str(experiment_type),
+                        'organism': str(self.dna_library_info['organism_id']),
+                        'sample_volume': str(self.dna_library_info['sample_volume']),
+                        'average_molecule_size': str(self.dna_library_info['average_size'])
+                    }
 
         if self.mapper:
             self.get_reference_ids()
@@ -446,6 +455,44 @@ class LaneAnalysis:
             properties['reference_index_dxid'] = self.reference_index_dxid
 
         return properties
+    
+def get_experiment_type(experiment_index):
+
+    experiment_dict = {
+                       1: "Whole-Genome DNA Fragments",
+                       2: "Whole-Genome DNA Mate Pairs",
+                       3: "Targeted Genomic DNA",
+                       4: "ChIP Experiment",
+                       5: "ChIP Control",
+                       6: "MethylSeq",
+                       7: "Whole-Transcript mRNA",
+                       8: "3'-End-Biased mRNA",
+                       9: "5'-End-Biased mRNA",
+                       10: "Small RNA",
+                       11: "Micro RNA",
+                       12: "Total RNA",
+                       13: "Other",
+                       14: "Unknown",
+                       15: "Whole-Transcript mRNA, Non-Directional",
+                       16: "Whole-Transcript mRNA, Strand Specific",
+                       17: "ATAC-Seq",
+                       18: "Single-Cell",
+                       19: "qPCR"
+                      }
+    return experiment_dict[int(experiment_index)]
+
+def update_project_properties():
+
+    project_properties = {
+                            'experiment_type': self.record_properties['experiment_type'],
+                            'lab': self.record_properties['lab'],
+                            'queue': self.record_properties['queue'],
+                            'sequencer_type': self.record_properties['sequencer_type'],
+                            'paired_end': self.record_properties['paired_end'],
+                            'sequencing_instrument': self.record_properties['sequencing_instrument'],
+                            'organism': self.record_properties['organism']
+                         }
+    dxpy.api.project_set_properties(self.project_id, input_params={'properties': project_properties})
 
 def parse_args():
 
@@ -479,6 +526,7 @@ def main():
 
     args = parse_args()
     print 'Info: Initiating analysis for %s lane %d' % (args.run_name, int(args.lane_index))
+    lane_name = '%s_L%d' % (args.run_name, int(args.lane_index))
     print args
     ## Dev: This needs to be changed. What is this.
     if args.test_mode == 'True': 
@@ -510,15 +558,17 @@ def main():
                                  develop = args.develop, 
                                  test_mode = test_mode)
     #pdb.set_trace()
-    print 'Info: Creating Dashboard Record'
+    print '%s: Creating Dashboard Record' % lane_name
     lane_analysis.create_dxrecord(args.develop)
-    print 'Info: Choosing Workflow'
+    print '%s: Updating Project Properties' % lane_name
+    lane_analysis.update_project_properties()
+    print '%s: Choosing Workflow' % lane_name
     lane_analysis.choose_workflow(dx_environment_json, args.develop)
-    print 'Info: Setting Workflow Inputs'
+    print '%s: Setting Workflow Inputs' % lane_name
     lane_analysis.set_workflow_inputs()
-    print 'Info: Configure Analysis'
+    print '%s: Configure Analysis' % lane_name
     lane_analysis.configure_analysis(args.dx_workflow_config_dir)
-    print 'Info: Launching analysis'
+    print '%s: Launching analysis' % lane_name
     lane_analysis.run_analysis()
 
 if __name__ == '__main__':
