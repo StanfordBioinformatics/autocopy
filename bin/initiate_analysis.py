@@ -54,6 +54,8 @@ class LaneAnalysis:
         self.interop_tar_id = None
         self.lane_tar_id = None
 
+        self.viewer_emails = []
+
         self.connection = Connection(lims_url=lims_url, lims_token=lims_token)
         self.run_info = RunInfo(conn=self.connection, run=run_name)
         print '\nRUN INFO\n'
@@ -115,9 +117,10 @@ class LaneAnalysis:
                                 'test_mode': self.test_mode,
                                 'barcode_mismatches': self.barcode_mismatches,
                                 'paired_end': self.run_info.data['paired_end'],
-                                'develop': self.develop 
+                                'develop': self.develop,
+                                'viewers': self.viewer_emails
         }
-        #pdb.set_trace()
+    
     def create_dxrecord(self, develop):
         details = self._set_record_details()
         self.record_properties = self._set_record_properties()
@@ -407,11 +410,13 @@ class LaneAnalysis:
 
     def _set_record_properties(self):
         
+        # Determine if paired end
         if self.run_info.data['paired_end'] == True:
             paired_end = 'true'
         else:
             paired_end = 'false'
 
+        # Get experiment type
         if self.dna_library_info['experiment_type_id']:
             experiment_type = get_experiment_type(int(self.dna_library_info['experiment_type_id']))
         else:
@@ -421,7 +426,7 @@ class LaneAnalysis:
                         'mapper': str(self.mapper),
                         'mismatches': str(self.map_mismatches),
                         'flowcell_id': str(self.run_info.data['flow_cell_id']),
-                        'sequencing_instrument': str(self.run_info.data['sequencing_instrument']),
+                        'seq_instrument': str(self.run_info.data['sequencing_instrument']),
                         'sequencer_type': str(self.run_info.data['platform_name']),
                         'queue': str(self.lane_info['queue']), 
                         'lane_project_id': str(self.project_id),
@@ -449,13 +454,34 @@ class LaneAnalysis:
                         'average_molecule_size': str(self.dna_library_info['average_size'])
                     }
 
+        ## Get optional key:value pairs
         if self.mapper:
             self.get_reference_ids()
             properties['reference_genome_dxid'] = self.reference_genome_dxid
             properties['reference_index_dxid'] = self.reference_index_dxid
 
+        # Get other emails to notify
+        if 'notify_comments' in self.lane_info.keys():
+            # notify_comments has CSV list of emails to notify
+            self.viewer_emails = get_viewer_emails(self.lane_info['notify_comments'])
+            email_str = ','.join(viewer_emails)
+            properties['viewer_emails'] = email_str
+        
         return properties
     
+    def update_project_properties(self):
+
+        project_properties = {
+                                'experiment_type': self.record_properties['experiment_type'],
+                                'lab': self.record_properties['lab'],
+                                'queue': self.record_properties['queue'],
+                                'sequencer_type': self.record_properties['sequencer_type'],
+                                'paired_end': self.record_properties['paired_end'],
+                                'seq_instrument': self.record_properties['seq_instrument'],
+                                'organism': self.record_properties['organism']
+                             }
+        dxpy.api.project_set_properties(self.project_id, input_params={'properties': project_properties})
+
 def get_experiment_type(experiment_index):
 
     experiment_dict = {
@@ -481,18 +507,13 @@ def get_experiment_type(experiment_index):
                       }
     return experiment_dict[int(experiment_index)]
 
-def update_project_properties():
-
-    project_properties = {
-                            'experiment_type': self.record_properties['experiment_type'],
-                            'lab': self.record_properties['lab'],
-                            'queue': self.record_properties['queue'],
-                            'sequencer_type': self.record_properties['sequencer_type'],
-                            'paired_end': self.record_properties['paired_end'],
-                            'sequencing_instrument': self.record_properties['sequencing_instrument'],
-                            'organism': self.record_properties['organism']
-                         }
-    dxpy.api.project_set_properties(self.project_id, input_params={'properties': project_properties})
+def get_viewer_emails(notify_comments):
+    if notify_comments:
+        comments = notify_comments.split(',')
+        viewer_emails = [comment.strip() for comment in comments]
+        return viewer_emails
+    else:
+        return None
 
 def parse_args():
 
