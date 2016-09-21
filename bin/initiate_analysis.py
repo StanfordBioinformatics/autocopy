@@ -95,6 +95,10 @@ class LaneAnalysis:
                 self.mapper = 'bwa_aln' # Changed to bwa_aln since qc_sample only accepts 'bwa_mem' or 'bwa_aln'
                 self.map_mismatches = self.lane_info['mapping_requests'][0]['max_mismatches']
                 self.reference_genome = self.lane_info['mapping_requests'][0]['reference_sequence_name']
+                # PBR, 160921: Hack to stop samples with "Other" listed as reference, from dying
+                # Should probably remove as submission option; follow-up with SeqCore
+                if self.reference_genome == 'Other':
+                    self.reference_genome = None
         except:
             print 'Warning: No mapping information found for %s' % self.run_name
             self.mapper = None
@@ -464,7 +468,7 @@ class LaneAnalysis:
         if 'notify_comments' in self.lane_info.keys():
             # notify_comments has CSV list of emails to notify
             self.viewer_emails = get_viewer_emails(self.lane_info['notify_comments'])
-            email_str = ','.join(viewer_emails)
+            email_str = ','.join(self.viewer_emails)
             properties['viewer_emails'] = email_str
         
         return properties
