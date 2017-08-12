@@ -1,3 +1,7 @@
 .idea/
 *.pyc
 *~
+logs
+run
+config/dx-env.azure.json
+config/autocopy.config.json

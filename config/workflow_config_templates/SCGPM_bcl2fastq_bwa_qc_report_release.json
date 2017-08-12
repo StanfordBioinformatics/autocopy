@@ -1,0 +1,259 @@
+{
+    "applets": {
+        "bcl2fastq": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "bcl2fastq", 
+                    "version": "1.8.4"
+                }, 
+                {
+                    "name": "bcl2fastq2", 
+                    "version": "2.17.1.14"
+                }
+            ], 
+            "internal_rscs": {
+                "python_packages": [
+                    "scgpm_lims"
+                ], 
+                "scripts": [
+                    "create_sample_sheet.py", 
+                    "calculate_use_bases_mask.py"
+                ]
+            }
+        }, 
+        "bwa_controller": {
+            "dxid": "", 
+            "external_rscs": [], 
+            "internal_rscs": {}
+        }, 
+        "generate_qc_report": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "pdf_reports", 
+                    "version": "1.0"
+                }
+            ], 
+            "internal_rscs": {}
+        }, 
+        "map_sample": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "bwa", 
+                    "version": "0.6.2"
+                }, 
+                {
+                    "name": "bwa", 
+                    "version": "0.7.7"
+                }, 
+                {
+                    "name": "picard_tools", 
+                    "version": "1.107"
+                }, 
+                {
+                    "name": "samtools", 
+                    "version": "0.1.19"
+                }
+            ], 
+            "internal_rscs": {}
+        }, 
+        "qc_controller": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "pdf_reports", 
+                    "version": "1.0"
+                }
+            ], 
+            "internal_rscs": {}
+        }, 
+        "qc_sample": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "picard_tools", 
+                    "version": "1.107"
+                }, 
+                {
+                    "name": "fastqc", 
+                    "version": "0.10.1"
+                }
+            ], 
+            "internal_rscs": {
+                "c_programs": [
+                    "bwa_mismatches", 
+                    "collect_uniqueness_metrics"
+                ]
+            }
+        }, 
+        "release_lane": {
+            "dxid": "", 
+            "external_rscs": [], 
+            "internal_rscs": {
+                "python_packages": [
+                    "scgpm_lims"
+                ]
+            }
+        }
+    }, 
+    "date_created": "", 
+    "dx_OS": "", 
+    "edit_version": 0, 
+    "stages": {
+        "0": {
+            "dxid": "", 
+            "executable": "bcl2fastq",
+            "type": "stand-alone",
+            "folder": "stage0_bcl2fastq", 
+            "input": {
+                "lane_data_tar": "$dnanexus_link-lane_data_tar_id", 
+                "metadata_tar": "$dnanexus_link-metadata_tar_id", 
+                "output_folder": "/stage0_bcl2fastq", 
+                "record_link": "$record_link",
+                "test_mode": "$test_mode",
+                "barcode_mismatches": "$barcode_mismatches"
+            }, 
+            "linked_input": {}, 
+            "name": "Demultiplex and bcl2fastq", 
+            "output": [
+                "fastqs", 
+                "tools_used"
+            ]
+        }, 
+        "1": {
+            "dxid": "", 
+            "executable": "bwa_controller",
+            "type": "controller", 
+            "worker_name": "map_sample",
+            "folder": "stage1_bwa", 
+            "input": { 
+                "record_link": "$record_link",
+                "worker_id": "", 
+                "worker_project": "",
+                "output_folder": "/stage1_bwa"
+            }, 
+            "linked_input": {
+                "fastqs": {
+                    "field": "outputField", 
+                    "name": "fastqs", 
+                    "stage": "0"
+                }
+            }, 
+            "name": "bwa", 
+            "output": [
+                "bams", 
+                "bais", 
+                "tools_used"
+            ]
+        }, 
+        "2": {
+            "dxid": "", 
+            "executable": "qc_controller",
+            "type": "controller",
+            "worker_name": "qc_sample",
+            "folder": "stage2_qc", 
+            "input": { 
+                "record_link": "$record_link",
+                "worker_id": "", 
+                "worker_project": "",
+                "output_folder": "/stage2_qc"
+            }, 
+            "linked_input": {
+                "bams": {
+                    "field": "outputField", 
+                    "name": "bams", 
+                    "stage": "1"
+                }, 
+                "fastqs": {
+                    "field": "outputField", 
+                    "name": "fastqs", 
+                    "stage": "0"
+                }
+            }, 
+            "name": "Gather QC data", 
+            "output": [
+                "tools_used", 
+                "mismatch_metrics", 
+                "qc_stats_jsons", 
+                "fastqc_reports", 
+                "alignment_summary_metrics", 
+                "insert_size_metrics"
+            ]
+        }, 
+        "3": {
+            "dxid": "", 
+            "executable": "generate_qc_report", 
+            "type": "stand-alone",
+            "folder": "stage3_qc_report", 
+            "input": {
+                "record_link": "$record_link",
+                "output_folder": "/stage3_qc_report",
+                "interop_tar": "$dnanexus_link-interop_tar_id"
+            }, 
+            "linked_input": {
+                "fastqs": {
+                    "field": "outputField", 
+                    "name": "fastqs", 
+                    "stage": "0"
+                }, 
+                "mismatch_metrics": {
+                    "field": "outputField", 
+                    "name": "mismatch_metrics", 
+                    "stage": "2"
+                }, 
+                "qc_stats_jsons": {
+                    "field": "outputField", 
+                    "name": "qc_stats_jsons", 
+                    "stage": "2"
+                }, 
+                "tools_used": [
+                    {
+                        "field": "outputField", 
+                        "name": "tools_used", 
+                        "stage": "0"
+                    }, 
+                    {
+                        "field": "outputField", 
+                        "name": "tools_used", 
+                        "stage": "1"
+                    }, 
+                    {
+                        "field": "outputField", 
+                        "name": "tools_used", 
+                        "stage": "2"
+                    }
+                ]
+            }, 
+            "name": "Generate QC Report", 
+            "output": [
+                "qc_pdf_report"
+            ]
+        }, 
+        "4": {
+            "dxid": "", 
+            "executable": "release_lane", 
+            "type": "stand-alone",
+            "folder": "", 
+            "input": {
+                      "record_link": "$record_link",
+                      "develop": "$develop",
+                      "viewers": "$viewers"
+            }, 
+            "linked_input": {
+                "qc_pdf_report": {
+                    "field": "outputField", 
+                    "name": "qc_pdf_report", 
+                    "stage": "3"
+                }
+            }, 
+            "name": "Release Lane Project", 
+            "tools_used": []
+        }
+    }, 
+    "name": "SCGPM_bcl2fastq_bwa_qc_report_release",
+    "status": "production",
+    "workflow_dxid": "", 
+    "workflow_project_dxid": ""
+}

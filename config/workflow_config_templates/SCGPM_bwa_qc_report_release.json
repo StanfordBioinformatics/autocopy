@@ -1,0 +1,206 @@
+{
+    "applets": {
+        "bwa_controller": {
+            "dxid": "", 
+            "external_rscs": [], 
+            "internal_rscs": {}
+        }, 
+        "generate_qc_report": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "pdf_reports", 
+                    "version": "1.0"
+                }
+            ], 
+            "internal_rscs": {}
+        }, 
+        "map_sample": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "bwa", 
+                    "version": "0.6.2"
+                }, 
+                {
+                    "name": "bwa", 
+                    "version": "0.7.7"
+                }, 
+                {
+                    "name": "picard_tools", 
+                    "version": "1.107"
+                }, 
+                {
+                    "name": "samtools", 
+                    "version": "0.1.19"
+                }
+            ], 
+            "internal_rscs": {}
+        }, 
+        "qc_controller": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "pdf_reports", 
+                    "version": "1.0"
+                }
+            ], 
+            "internal_rscs": {}
+        }, 
+        "qc_sample": {
+            "dxid": "", 
+            "external_rscs": [
+                {
+                    "name": "picard_tools", 
+                    "version": "1.107"
+                }, 
+                {
+                    "name": "fastqc", 
+                    "version": "0.10.1"
+                }
+            ], 
+            "internal_rscs": {
+                "c_programs": [
+                    "bwa_mismatches", 
+                    "collect_uniqueness_metrics"
+                ]
+            }
+        }, 
+        "release_lane": {
+            "dxid": "", 
+            "external_rscs": [], 
+            "internal_rscs": {
+                "python_packages": [
+                    "scgpm_lims"
+                ]
+            }
+        }
+    }, 
+    "date_created": "", 
+    "dx_OS": "", 
+    "edit_version": 0, 
+    "stages": {
+        "0": {
+            "dxid": "", 
+            "executable": "bwa_controller",
+            "type": "controller", 
+            "worker_name": "map_sample",
+            "folder": "stage1_bwa", 
+            "input": { 
+                "record_id": "$record_id",
+                "worker_id": "", 
+                "worker_project": "",
+                "output_folder": "/stage1_bwa",
+                "fastqs": ""
+            }, 
+            "linked_input": {},
+            "name": "bwa", 
+            "output": [
+                "bams", 
+                "bais", 
+                "tools_used"
+            ]
+        }, 
+        "1": {
+            "dxid": "", 
+            "executable": "qc_controller",
+            "type": "controller",
+            "worker_name": "qc_sample",
+            "folder": "stage2_qc", 
+            "input": { 
+                "record_id": "$record_id",
+                "worker_id": "", 
+                "worker_project": "",
+                "output_folder": "/stage2_qc"
+            }, 
+            "linked_input": {
+                "bams": {
+                    "field": "outputField", 
+                    "name": "bams", 
+                    "stage": "0"
+                }, 
+                "fastqs": {
+                    "field": "inputField", 
+                    "name": "fastqs", 
+                    "stage": "0"
+                }
+            }, 
+            "name": "Gather QC data", 
+            "output": [
+                "tools_used", 
+                "mismatch_metrics", 
+                "qc_stats_jsons", 
+                "fastqc_reports", 
+                "alignment_summary_metrics", 
+                "insert_size_metrics"
+            ]
+        }, 
+        "2": {
+            "dxid": "", 
+            "executable": "generate_qc_report", 
+            "type": "stand-alone",
+            "folder": "stage3_qc_report", 
+            "input": {
+                "record_id": "$record_id",
+                "output_folder": "/stage3_qc_report"
+            }, 
+            "linked_input": {
+                "fastqs": {
+                    "field": "inputField", 
+                    "name": "fastqs", 
+                    "stage": "0"
+                }, 
+                "mismatch_metrics": {
+                    "field": "outputField", 
+                    "name": "mismatch_metrics", 
+                    "stage": "1"
+                }, 
+                "qc_stats_jsons": {
+                    "field": "outputField", 
+                    "name": "qc_stats_jsons", 
+                    "stage": "1"
+                }, 
+                "tools_used": [
+                    {
+                        "field": "outputField", 
+                        "name": "tools_used", 
+                        "stage": "0"
+                    }, 
+                    {
+                        "field": "outputField", 
+                        "name": "tools_used", 
+                        "stage": "1"
+                    }
+                ]
+            }, 
+            "name": "Generate QC Report", 
+            "output": [
+                "qc_pdf_report"
+            ]
+        }, 
+        "3": {
+            "dxid": "", 
+            "executable": "release_lane", 
+            "type": "stand-alone",
+            "folder": "", 
+            "input": {
+                      "record_id": "$record_id",
+                      "develop": "$develop",
+                      "viewers": "$viewers"
+            }, 
+            "linked_input": {
+                "qc_pdf_report": {
+                    "field": "outputField", 
+                    "name": "qc_pdf_report", 
+                    "stage": "2"
+                }
+            }, 
+            "name": "Release Lane Project", 
+            "tools_used": []
+        }
+    }, 
+    "name": "SCGPM_bwa_qc_report_release",
+    "status": "production",
+    "workflow_dxid": "", 
+    "workflow_project_dxid": ""
+}
