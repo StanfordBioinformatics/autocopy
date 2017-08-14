@@ -521,7 +521,7 @@ class RunDir:
                 return status == RunDir.STATUS_BASECALLING_COMPLETE_READ2
             
         elif self.get_platform() in [RunDir.PLATFORM_ILLUMINA_HISEQ,RunDir.PLATFORM_ILLUMINA_MISEQ]:
-            sw_version = self.get_control_software_version_integer()
+            #sw_version = self.get_control_software_version_integer()
             return status == RunDir.STATUS_RTA_COMPLETE
 
         else:
@@ -994,7 +994,7 @@ class RunDir:
     #
     def get_control_software_version_integer(self):
 
-        sw_version = self.get_control_software_version()
+        #sw_version = self.get_control_software_version()
         if sw_version is None:
             return None
         else:
@@ -1067,7 +1067,7 @@ class RunDir:
             #   Otherwise, SeqKit v1 uses four digit tile numbers and has 2 swaths.
             #              SeqKit v3 uses four digit tile numbers and has 3 swaths.
             #
-            sw_version = self.get_control_software_version()
+            #sw_version = self.get_control_software_version()
             seq_kit_version = self.get_seq_kit_version()
             if sw_version.startswith("1.1.37"):
                 # Tiles 1..8, 21..28, 41..48, 61..68
