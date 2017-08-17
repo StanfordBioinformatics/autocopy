@@ -191,9 +191,10 @@ class LaneAnalysis:
                 self.workflow_id = workflow['id']
                 self.workflow_project_id = workflow['project_id']
                 self.workflow_json_file = workflow['json_file']
-            
-            print "Choosing workflow: %s" % workflow
-            return workflow
+           
+                #pdb.set_trace() 
+                print "Choosing workflow: %s" % workflow
+                return workflow
         print "Error: Could not choose workflow"
         pdb.set_trace()
 
@@ -233,7 +234,7 @@ class LaneAnalysis:
                 self.analysis_input[key] = value
 
     def get_reference_ids(self):
-        reference_genome_project = 'project-BJJ0GQQ09Vv5Q7GKYGzQ0066'
+        reference_genome_project = 'project-F3x6Zf89QqxF6vjK0qfkJG1y'
         self.reference_genome_dxid = dxpy.find_one_data_object(classname='file',
                                                              name='genome.fa.gz',
                                                              name_mode='exact',
