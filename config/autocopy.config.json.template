@@ -1,0 +1,20 @@
+{
+ "LOG_DIR_DEFAULT": "/usr/local/trjread/dev/autocopy/logs/",
+ "COPY_DEST_RUN_ROOT": "",
+ "COPY_SOURCE_RUN_ROOTS": ["/seqctr/Runs/Runs_Develop"],
+ "COPY_SOURCE_RUN_TARS": "/seqctr/Runs/Run_Archives",
+ "SUBDIR_COMPLETED": "/seqctr/Runs/Runs_Completed",
+ "SUBDIR_ABORTED": "/seqctr/Runs/Runs_Aborted",
+ "MAIN_LOOP_DELAY_SECONDS": 600,
+ "UHTS_LIMS_URL": "",
+ "UHTS_LIMS_TOKEN": "",
+ "INITIATE_ANALYSIS_SCRIPT": "",
+ "UPLOAD_AGENT": "/usr/local/dnanexus-upload-agent/1.5.25/ua",
+ "UA_TOKEN": "",
+ "REGION": "azure:westus",
+ "VIEWERS": [],
+ "CONTRIBUTORS": [],
+ "ADMINISTRATORS": [],
+ "DX_ENV_CONFIG": "/usr/local/trjread/dev/autocopy/config/dx-env.azure.json",
+ "DX_WORKFLOW_CONFIG_DIR": "/usr/local/trjread/dev/autocopy/config/workflow_config_templates"
+}

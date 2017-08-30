@@ -1,0 +1,66 @@
+{
+    "upload_dir_path": "",
+    "lims_url": "www.uhts.stanford.edu",
+    "lims_token": "",
+    "dnanexus_token": "",
+    "dashboard_records": {
+                          "prod": {
+                                   "project_id": "",
+                                   "project_name": "SCGPM Dashboard Data Azure"
+                                  },
+                          "dev": {
+                                  "project_id": "",
+                                  "project_name": "SCGPM Dashboard Dev"
+                                 }
+    },
+    "reference_genomes": {
+                                  "project_id": "",
+                                  "project_name": "SCGPM Reference Genomes"
+    },
+    "production_workflows": {
+                             "SCGPM_bcl2fastq_bwa_qc_release": {
+                                                                "id": "",
+                                                                "json_file": "SCGPM_bcl2fastq_bwa_qc_report_release.json",
+                                                                "operations": [
+                                                                               "bcl2fastq", 
+                                                                               "bwa", 
+                                                                               "qc", 
+                                                                               "release"],
+                                                                "project_id": "",
+                                                                "project_name": "SCGPM_Workflows_Production"
+                             },
+                             "SCGPM_bcl2fastq_qc_release": {
+                                                            "id": "",
+                                                            "json_file": "SCGPM_bcl2fastq_qc_report_release.json",
+                                                            "operations": [
+                                                                           "bcl2fastq", 
+                                                                           "qc", 
+                                                                           "release"],
+                                                            "project_id": "",
+                                                            "project_name": "SCGPM_Workflows_Production"
+                             }
+    },
+    "development_workflows": {
+                              "SCGPM_bcl2fastq_bwa_qc_report_release": {
+                                                                 "id": "",
+                                                                 "json_file": "SCGPM_bcl2fastq_bwa_qc_report_release.json",
+                                                                 "operations": [
+                                                                                "bcl2fastq", 
+                                                                                "bwa", 
+                                                                                "qc", 
+                                                                                "release"],
+                                                                 "project_id": "",
+                                                                 "project_name": "SCGPM_Workflows_Develop_Azure"
+                              },
+                              "SCGPM_bcl2fastq_qc_report_release": {
+                                                             "id": "",
+                                                             "json_file": "SCGPM_bcl2fastq_qc_report_release.json",
+                                                             "operations": [
+                                                                            "bcl2fastq", 
+                                                                            "qc", 
+                                                                            "release"],
+                                                             "project_id": "",
+                                                             "project_name": "SCGPM_Workflows_Develop_Azure"
+                              }
+    }
+} 
