@@ -147,7 +147,9 @@ class DNAnexusUpload:
 
         # Tar metadata files
         print 'RTA version is: %s' % self.rta_version
-        if StrictVersion(self.rta_version) < StrictVersion('2.0.0'):
+        if self.rta_version == '1.18.66.4':
+            self.metadata_tar = self.tar_rta_v2_metadata()
+        elif StrictVersion(self.rta_version) < StrictVersion('2.0.0'):
             print 'Tarring metadata according to RTA v1 pattern'
             #print 'ERROR: workflow does not support RTA versions older than 1.18.54'
             #sys.exit()
@@ -170,7 +172,9 @@ class DNAnexusUpload:
         for lane_name in self.lane_paths:
             lane_index = int(lane_name[-1:])
             #lane_tar = self.tar_rta_v2_lane_path(lane_name, lane_index)
-            if StrictVersion(self.rta_version) < StrictVersion('2.0.0'):
+            if self.rta_version == '1.18.66.4':
+                lane_tar = self.tar_rta_v2_lane_path(lane_name, lane_index)
+            elif StrictVersion(self.rta_version) < StrictVersion('2.0.0'):
                 lane_tar = self.tar_rta_v1_lane_path(lane_name, lane_index)
             elif StrictVersion(self.rta_version) >= StrictVersion('2.0.0'):
                 print 'Tarring lane %d according to RTA v2 pattern' % lane_index
