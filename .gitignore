@@ -1,7 +1,11 @@
 .idea/
 *.pyc
 *~
-logs
-run
+run/*.pid
 config/dx-env.azure.json
 config/autocopy.config.json
+
+# Environment-specific log files
+logs/*.log
+logs/*.err
+logs/*.dbg
