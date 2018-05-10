@@ -1,0 +1,3 @@
+[submodule "scgpm_lims"]
+	path = scgpm_lims
+	url = https://github.com/StanfordBioinformatics/scgpm_lims.git
